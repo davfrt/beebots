@@ -31,6 +31,12 @@ export interface FundingBill {
   ts: number;
 }
 
+export interface FundingBillPage {
+  items: FundingBill[];
+  /** Pass to the next request to continue toward older bills. */
+  next: string | null;
+}
+
 export interface ExternalClose {
   ordId: string | null;
   avgPx: number;
@@ -60,7 +66,7 @@ export interface Executor {
   init(bee: BeeId): Promise<void>;
   market(bee: BeeId, req: OrderReq): Promise<OrderResult>;
   positions(bee: BeeId): Promise<ExchangePosition[] | null>;
-  fundingBills(bee: BeeId): Promise<FundingBill[] | null>;
+  fundingBills(bee: BeeId, after?: string): Promise<FundingBill[] | FundingBillPage | null>;
   /** Fees OKX charged for these order ids (USD, positive = paid). */
   feesFor(bee: BeeId, instIds: string[], ordIds: Set<string>): Promise<Map<string, number> | null>;
   protect(bee: BeeId, req: ProtectiveStopReq): Promise<ProtectiveStopResult>;
@@ -221,11 +227,14 @@ export class OkxExecutor implements Executor {
     }
   }
 
-  async fundingBills(bee: BeeId): Promise<FundingBill[] | null> {
+  async fundingBills(bee: BeeId, after?: string): Promise<FundingBillPage | null> {
     try {
-      const rows = await this.run<Row[]>(bee, ["account", "bills", "--instType", "FUTURES", "--limit", "100"]);
+      const rows = await this.run<Row[]>(bee, ["account", "bills", "--instType", "FUTURES", "--limit", "100", ...(after ? ["--after", after] : [])]);
       // type 8 = funding fee
-      return rows.filter((r) => r.type === "8").map((r) => ({ billId: r.billId!, instId: r.instId || null, amountUsd: Number(r.balChg), ts: Number(r.ts) }));
+      return {
+        items: rows.filter((r) => r.type === "8").map((r) => ({ billId: r.billId!, instId: r.instId || null, amountUsd: Number(r.balChg), ts: Number(r.ts) })),
+        next: rows.length === 100 ? rows.at(-1)?.billId ?? null : null,
+      };
     } catch (err) {
       log.warn("bills read failed", { bee, err: safeError(err) });
       return null;
@@ -236,8 +245,15 @@ export class OkxExecutor implements Executor {
     try {
       const out = new Map<string, number>();
       for (const instId of instIds) {
-        const rows = await this.run<Row[]>(bee, ["futures", "fills", "--instId", instId]);
-        for (const r of rows) if (r.ordId && ordIds.has(r.ordId)) out.set(r.ordId, (out.get(r.ordId) ?? 0) - Number(r.fee || 0));
+        let after: string | undefined;
+        for (;;) {
+          const rows = await this.run<Row[]>(bee, ["futures", "fills", "--instId", instId, "--limit", "100", ...(after ? ["--after", after] : [])]);
+          for (const r of rows) if (r.ordId && ordIds.has(r.ordId)) out.set(r.ordId, (out.get(r.ordId) ?? 0) - Number(r.fee || 0));
+          if (out.size === ordIds.size || rows.length < 100) break;
+          const next = rows.at(-1)?.tradeId;
+          if (!next || next === after) break;
+          after = next;
+        }
       }
       return out;
     } catch (err) {

@@ -794,17 +794,51 @@ export class Engine {
 
   /** MODE=demo/live: record funding bills (type 8) as their own ledger rows. */
   private async pollFunding() {
-    const since = Number(this.d.db.getMeta("funding_since") ?? 0);
     for (const id of this.ids) {
-      const bills = await this.d.exec.fundingBills(id);
-      for (const b of bills ?? []) {
-        if (b.ts < since) continue;
-        if (this.d.db.insertFunding(id, b.ts, b.instId, b.amountUsd, b.billId)) {
-          applyFunding(this.bees[id], b.amountUsd);
-          this.d.bus.emit("funding", { bee: id, coin: b.instId?.split("-")[0] ?? null, amountUsd: b.amountUsd }, b.ts);
+      if (!(await this.recoverFunding(id))) throw new Error(`could not read OKX funding for ${id}`);
+    }
+  }
+
+  /** Walk every page back to the durable cursor; a 100-row outage window must not discard older bills. */
+  private async recoverFunding(id: BeeId): Promise<boolean> {
+    const cursorKey = `funding_cursor_${id}`;
+    const cursor = this.d.db.getMeta(cursorKey);
+    const since = Number(this.d.db.getMeta("funding_since") ?? 0);
+    const recovered = [] as import("./exec/executor.js").FundingBill[];
+    let after: string | undefined;
+    let newest: string | null = null;
+    let reached = false;
+    for (;;) {
+      const page = await this.d.exec.fundingBills(id, after);
+      if (page === null) return false;
+      const items = Array.isArray(page) ? page : page.items;
+      if (!newest && items[0]) newest = items[0].billId;
+      recovered.push(...items);
+      if (items.some((bill) => bill.billId === cursor) || (!cursor && items.every((bill) => bill.ts < since))) {
+        reached = true;
+        break;
+      }
+      const next = Array.isArray(page) ? null : page.next;
+      if (!next) {
+        if (!cursor) {
+          reached = true;
+          break;
         }
+        return false;
+      }
+      if (next === after) return false;
+      after = next;
+    }
+    if (!reached) return false;
+    for (const bill of recovered.reverse()) {
+      if (bill.ts < since) continue;
+      if (this.d.db.insertFunding(id, bill.ts, bill.instId, bill.amountUsd, bill.billId)) {
+        applyFunding(this.bees[id], bill.amountUsd);
+        this.d.bus.emit("funding", { bee: id, coin: bill.instId?.split("-")[0] ?? null, amountUsd: bill.amountUsd }, bill.ts);
       }
     }
+    if (newest) this.d.db.setMeta(cursorKey, newest);
+    return true;
   }
 
   /** Every 5 min (demo/live): our position and fees vs OKX. On mismatch, adopt OKX's position and go red. */
@@ -838,8 +872,7 @@ export class Engine {
         diffs.push(`${this.d.cfg.slots[id].name}: ${detail}`);
         continue;
       }
-      const funding = await this.d.exec.fundingBills(id);
-      if (funding === null) {
+      if (!(await this.recoverFunding(id))) {
         diffs.push(`${this.d.cfg.slots[id].name}: could not read OKX funding`);
         continue;
       }
@@ -866,6 +899,11 @@ export class Engine {
       const theirFees = await this.d.exec.feesFor(id, [...new Set(rows.map((r) => r.instId))], new Set(rows.map((r) => r.ordId)));
       if (theirFees) {
         if (rows.length) {
+          const requested = new Set(rows.map((row) => row.ordId));
+          if ([...requested].some((ordId) => !theirFees.has(ordId))) {
+            ok = false;
+            detail += "; incomplete OKX fee history";
+          }
           const ourSum = rows.filter((r) => theirFees.has(r.ordId)).reduce((a, r) => a + r.fee, 0);
           const theirSum = [...theirFees.values()].reduce((a, b) => a + b, 0);
           if (Math.abs(ourSum - theirSum) >= 0.005) {
@@ -907,9 +945,6 @@ export class Engine {
           if (inst && np.initialStopPx !== null && np.initialStopPx !== undefined) np.riskUsd = sizedRiskUsd(np.contracts, inst.ctVal, np.entryPx, np.initialStopPx);
           bee.flatSince = null;
         }
-      }
-      for (const b of funding) {
-        if (this.d.db.insertFunding(id, b.ts, b.instId, b.amountUsd, b.billId)) applyFunding(bee, b.amountUsd);
       }
       this.d.db.saveBee(bee, now);
       this.d.db.insertRecon(id, now, ok, { detail });
