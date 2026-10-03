@@ -3,7 +3,7 @@ import { log } from "../log.js";
 import type { Instrument, Ticker } from "../market/types.js";
 import type { OkxCli } from "../okx/cli.js";
 import { safeError } from "../redact.js";
-import { formatSz } from "./sizing.js";
+import { formatStopPx, formatSz } from "./sizing.js";
 
 export interface OrderReq {
   instId: string;
@@ -31,6 +31,30 @@ export interface FundingBill {
   ts: number;
 }
 
+export interface ExternalClose {
+  ordId: string | null;
+  avgPx: number;
+  feeUsd: number;
+  ts: number;
+}
+
+export interface AccountInfo {
+  uid: string;
+  mainUid: string;
+  permissions: readonly string[];
+  ipBound: boolean;
+}
+
+export interface ProtectiveStopReq {
+  instId: string;
+  closeSide: "buy" | "sell";
+  contracts: number;
+  triggerPx: number;
+  algoId?: string;
+}
+
+export type ProtectiveStopResult = { ok: true; algoId: string | null; triggerPx: number } | { ok: false; error: { code: string; message: string } };
+
 export interface Executor {
   readonly kind: "sim" | "okx";
   init(bee: BeeId): Promise<void>;
@@ -39,6 +63,16 @@ export interface Executor {
   fundingBills(bee: BeeId): Promise<FundingBill[] | null>;
   /** Fees OKX charged for these order ids (USD, positive = paid). */
   feesFor(bee: BeeId, instIds: string[], ordIds: Set<string>): Promise<Map<string, number> | null>;
+  protect(bee: BeeId, req: ProtectiveStopReq): Promise<ProtectiveStopResult>;
+  cancelProtection(bee: BeeId, instId: string, algoId: string): Promise<boolean>;
+  /** Exchange-side close not sent through market(), notably a native protective stop. */
+  externalClose(bee: BeeId, instId: string, closeSide: "buy" | "sell", since: number, contracts: number, excludedOrdIds?: Set<string>): Promise<ExternalClose | null>;
+  protectionMatches(bee: BeeId, req: ProtectiveStopReq & { algoId: string }): Promise<boolean>;
+  accountInfo(bee: BeeId): Promise<AccountInfo | null>;
+  accountEquity(bee: BeeId): Promise<number | null>;
+  accountId(bee: BeeId): Promise<string | null>;
+  pendingOrders(bee: BeeId): Promise<unknown[] | null>;
+  conditionalOrders(bee: BeeId): Promise<unknown[] | null>;
 }
 
 /**
@@ -71,6 +105,33 @@ export class SimExecutor implements Executor {
     return null;
   }
   async feesFor(): Promise<null> {
+    return null;
+  }
+  async protect(_bee: BeeId, req: ProtectiveStopReq): Promise<ProtectiveStopResult> {
+    return { ok: true, algoId: null, triggerPx: req.triggerPx };
+  }
+  async cancelProtection(): Promise<boolean> {
+    return true;
+  }
+  async externalClose(): Promise<null> {
+    return null;
+  }
+  async protectionMatches(): Promise<boolean> {
+    return true;
+  }
+  async accountEquity(): Promise<null> {
+    return null;
+  }
+  async accountId(): Promise<null> {
+    return null;
+  }
+  async accountInfo(): Promise<null> {
+    return null;
+  }
+  async pendingOrders(): Promise<null> {
+    return null;
+  }
+  async conditionalOrders(): Promise<null> {
     return null;
   }
 }
@@ -181,6 +242,139 @@ export class OkxExecutor implements Executor {
       return out;
     } catch (err) {
       log.warn("fills read failed", { bee, err: safeError(err) });
+      return null;
+    }
+  }
+
+  async protect(bee: BeeId, req: ProtectiveStopReq): Promise<ProtectiveStopResult> {
+    const inst = this.instrument(req.instId);
+    if (!inst) return { ok: false, error: { code: "INST", message: "unknown instrument" } };
+    const trigger = formatStopPx(req.triggerPx, req.closeSide, inst);
+    try {
+      if (req.algoId) {
+        const [ack] = await this.run<Row[]>(bee, [
+          "futures", "algo", "amend", "--instId", req.instId, "--algoId", req.algoId,
+          "--newSz", formatSz(req.contracts, inst), "--newSlTriggerPx", trigger, "--newSlOrdPx", "-1",
+        ]);
+        if (!ack || (ack.sCode && ack.sCode !== "0")) return { ok: false, error: { code: ack?.sCode ?? "NOACK", message: ack?.sMsg ?? "no protection amend ack" } };
+        return { ok: true, algoId: req.algoId, triggerPx: Number(trigger) };
+      }
+      const [ack] = await this.run<Row[]>(bee, [
+        "futures", "algo", "place", "--instId", req.instId, "--side", req.closeSide, "--sz", formatSz(req.contracts, inst),
+        "--ordType", "conditional", "--slTriggerPx", trigger, "--slOrdPx", "-1", "--slTriggerPxType", "mark",
+        "--posSide", "net", "--tdMode", "isolated", "--reduceOnly", "--cxlOnClosePos",
+      ]);
+      if (!ack || (ack.sCode && ack.sCode !== "0") || !ack.algoId) return { ok: false, error: { code: ack?.sCode ?? "NOACK", message: ack?.sMsg ?? "no protection algo id" } };
+      return { ok: true, algoId: ack.algoId, triggerPx: Number(trigger) };
+    } catch (err) {
+      return { ok: false, error: safeError(err) };
+    }
+  }
+
+  async cancelProtection(bee: BeeId, instId: string, algoId: string): Promise<boolean> {
+    try {
+      const [ack] = await this.run<Row[]>(bee, ["futures", "algo", "cancel", "--instId", instId, "--algoId", algoId]);
+      return !!ack && (!ack.sCode || ack.sCode === "0");
+    } catch (err) {
+      log.warn("protective stop cancel failed", { bee, err: safeError(err) });
+      return false;
+    }
+  }
+
+  async externalClose(bee: BeeId, instId: string, closeSide: "buy" | "sell", since: number, contracts: number, excludedOrdIds = new Set<string>()): Promise<ExternalClose | null> {
+    try {
+      const rows = await this.run<Row[]>(bee, ["futures", "fills", "--instId", instId]);
+      const fills = rows
+        .filter((r) => r.side === closeSide && !excludedOrdIds.has(r.ordId ?? "") && Number(r.ts) >= since && Number(r.fillSz || r.sz) > 0 && Number(r.fillPx || r.px) > 0)
+        .sort((a, b) => Number(b.ts) - Number(a.ts));
+      let remaining = contracts;
+      let qty = 0;
+      let value = 0;
+      let fee = 0;
+      let ts = 0;
+      let ordId: string | null = null;
+      for (const row of fills) {
+        const take = Math.min(remaining, Number(row.fillSz || row.sz));
+        qty += take;
+        value += take * Number(row.fillPx || row.px);
+        fee += -Number(row.fee || 0) * (take / Number(row.fillSz || row.sz));
+        ts = Math.max(ts, Number(row.ts));
+        ordId ??= row.ordId || null;
+        remaining -= take;
+        if (remaining <= 1e-9) break;
+      }
+      return qty >= contracts - 1e-9 ? { ordId, avgPx: value / qty, feeUsd: fee, ts } : null;
+    } catch (err) {
+      log.warn("external close fill read failed", { bee, err: safeError(err) });
+      return null;
+    }
+  }
+
+  async protectionMatches(bee: BeeId, req: ProtectiveStopReq & { algoId: string }): Promise<boolean> {
+    try {
+      const inst = this.instrument(req.instId);
+      if (!inst) return false;
+      const trigger = Number(formatStopPx(req.triggerPx, req.closeSide, inst));
+      const rows = await this.run<Row[]>(bee, ["futures", "algo", "orders", "--instId", req.instId, "--ordType", "conditional"]);
+      return rows.some((r) => r.algoId === req.algoId && (!r.state || r.state === "live") && r.side === req.closeSide && Math.abs(Number(r.sz) - req.contracts) < 1e-9 && Number(r.slTriggerPx) === trigger && /^(true|1)$/i.test(r.reduceOnly ?? ""));
+    } catch (err) {
+      log.warn("protective stop verification failed", { bee, err: safeError(err) });
+      return false;
+    }
+  }
+
+  async accountEquity(bee: BeeId): Promise<number | null> {
+    try {
+      const [balance] = await this.run<Array<{ details?: Row[] }>>(bee, ["account", "balance", "USDC"]);
+      const usdc = balance?.details?.find((r) => r.ccy === "USDC");
+      const equity = Number(usdc?.eq);
+      return Number.isFinite(equity) ? equity : null;
+    } catch (err) {
+      log.warn("account equity read failed", { bee, err: safeError(err) });
+      return null;
+    }
+  }
+
+  async accountInfo(bee: BeeId): Promise<AccountInfo | null> {
+    try {
+      const [cfg] = await this.run<Row[]>(bee, ["account", "config"]);
+      if (!cfg?.uid || !cfg.mainUid) return null;
+      return {
+        uid: cfg.uid,
+        mainUid: cfg.mainUid,
+        permissions: (cfg.perm ?? "").split(",").map((permission) => permission.trim().toLowerCase()).filter(Boolean),
+        ipBound: (cfg.ip ?? "").split(",").some((ip) => ip.trim() !== ""),
+      };
+    } catch (err) {
+      log.warn("account config read failed", { bee, err: safeError(err) });
+      return null;
+    }
+  }
+
+  async accountId(bee: BeeId): Promise<string | null> {
+    try {
+      const [cfg] = await this.run<Row[]>(bee, ["account", "config"]);
+      return cfg?.uid || null;
+    } catch (err) {
+      log.warn("account id read failed", { bee, err: safeError(err) });
+      return null;
+    }
+  }
+
+  async pendingOrders(bee: BeeId): Promise<unknown[] | null> {
+    try {
+      return await this.run<Row[]>(bee, ["futures", "orders"]);
+    } catch (err) {
+      log.warn("pending orders read failed", { bee, err: safeError(err) });
+      return null;
+    }
+  }
+
+  async conditionalOrders(bee: BeeId): Promise<unknown[] | null> {
+    try {
+      return await this.run<Row[]>(bee, ["futures", "algo", "orders", "--ordType", "conditional"]);
+    } catch (err) {
+      log.warn("conditional orders read failed", { bee, err: safeError(err) });
       return null;
     }
   }

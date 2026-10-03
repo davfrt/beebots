@@ -40,6 +40,15 @@ describe("a rejected new order pauses that bee's new orders", () => {
       async positions() { return []; },
       async fundingBills() { return []; },
       async feesFor() { return new Map(); },
+      async protect(_bee, req) { return { ok: true, algoId: null, triggerPx: req.triggerPx }; },
+      async cancelProtection() { return true; },
+      async externalClose() { return null; },
+      async protectionMatches() { return true; },
+      async accountEquity() { return null; },
+      async accountId() { return null; },
+      async accountInfo() { return null; },
+      async pendingOrders() { return null; },
+      async conditionalOrders() { return null; },
     };
     const alerts: string[] = [];
     const db = new Db(":memory:");

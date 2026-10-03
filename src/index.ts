@@ -11,6 +11,7 @@ import { Hive, hivePath } from "./hive.js";
 import { OkxExecutor, SimExecutor, type Executor } from "./exec/executor.js";
 import { Jev } from "./jev.js";
 import { log, setLogLevel } from "./log.js";
+import { preflightLiveAccounts } from "./live-preflight.js";
 import { MarketFeed } from "./market/data.js";
 import { createOkxCli } from "./okx/cli.js";
 import { createNewsSource } from "./okx/news.js";
@@ -22,6 +23,7 @@ import { loadSettings, STYLE_INFO } from "./settings.js";
 import { imagePath, Setup } from "./setup.js";
 import { UpdateCheck } from "./update.js";
 import { Visitors } from "./visitors.js";
+import { runCompetitionApp } from "./competition-app.js";
 
 const SETTINGS_PATH = process.env.SETTINGS_PATH?.trim() || "./data/settings.json";
 // Reference portraits for generated bees: the dashboard's default art (copied into the image by the Dockerfile).
@@ -88,6 +90,7 @@ async function main() {
   }
   setLogLevel(cfg.logLevel);
   log.info("beebots engine starting", { mode: cfg.mode, tickMs: cfg.tickMs, dataRefreshMs: cfg.dataRefreshMs, jevModel: cfg.jev.model });
+  if (cfg.competition.enabled) return runCompetitionApp(cfg);
 
   const db = new Db(cfg.dbPath);
   const bus = new EventBus(db);
@@ -133,6 +136,7 @@ async function main() {
     return true;
   };
   engine = new Engine({ cfg, db, feed, jev, exec, bus, alerts, closeRequested: () => existsSync(closeFlag), takeResumeRequest });
+  if (cfg.mode === "live") log.info("live account preflight passed", { preflight: await preflightLiveAccounts({ cfg, db, exec, ids: BEES }) });
   await engine.start();
 
   // The owner password (picked on Setup) gates joining and leaving the Hive from the dashboard. Installs without one
