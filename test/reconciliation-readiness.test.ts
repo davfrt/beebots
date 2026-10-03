@@ -76,6 +76,26 @@ describe("exchange reconciliation readiness", () => {
     expect(engine.bees.bee1.totals.feesUsd).toBe(0.2);
   });
 
+  it("persists a recovered partial open once", async () => {
+    const cfg = testConfig({ DRY_RUN: "true" });
+    const market = view([coin("ENA")]);
+    const feed = { view: () => market, refresh: async () => {}, refreshTickers: async () => {}, lastRefreshAt: NOW } as unknown as MarketFeed;
+    const db = new Db(":memory:");
+    const decisionId = db.insertDecision({ bee: "bee1", ts: NOW, stateHash: "", stateJson: "{}", menuJson: "[]", choice: null, probabilities: null, confidence: null, conviction: null, latencyMs: null, inputTokens: null, jevCostUsd: 0, jevError: null, action: { kind: "open", instId: "ENA-USD_UM_XPERP-310404", side: "long" }, vetoedBy: null, forcedBy: null, status: "test" });
+    const orderId = db.insertOrder({ decisionId, bee: "bee1", ts: NOW, clOrdId: "bee1-partial", instId: "ENA-USD_UM_XPERP-310404", side: "buy", contracts: 2, reduceOnly: false, purpose: "open" });
+    db.updateOrder(orderId, "unknown", null, "timeout");
+    const exec = fakeExchange(() => [{ instId: "ENA-USD_UM_XPERP-310404", pos: 1, avgPx: 100 }], []);
+    exec.orderByClientId = async () => ({ ok: true, state: "partial", ordId: "order-partial", contracts: 1, avgPx: 100, feeUsd: 0.1, ts: NOW });
+    exec.accountEquity = async () => 332.9;
+    const engine = new Engine({ cfg, db, feed, jev: new Jev({ ...cfg.jev, client: openingJev(), now: () => NOW }), exec, bus: new EventBus(db), alerts: { send() {} } as unknown as Alerts, now: () => NOW, ids: ["bee1"] });
+
+    await engine.start();
+    engine.stop();
+
+    expect(db.raw.prepare("SELECT state FROM orders WHERE id = ?").get(orderId)).toEqual({ state: "partial" });
+    expect(db.raw.prepare("SELECT contracts FROM fills WHERE order_id = ?").get(orderId)).toEqual({ contracts: 1 });
+  });
+
   it("does not duplicate a recovered fill after a file-backed restart", async () => {
     const dir = mkdtempSync(join(tmpdir(), "beebots-recovery-"));
     const path = join(dir, "bees.sqlite");

@@ -14,7 +14,7 @@ export interface OrderReq {
 }
 
 export type OrderResult =
-  | { ok: true; ordId: string | null; contracts: number; avgPx: number; feeUsd: number; ts: number }
+  | { ok: true; ordId: string | null; contracts: number; avgPx: number; feeUsd: number; ts: number; state?: "partial" }
   | { ok: false; error: { code: string; message: string }; state: "rejected" | "unknown" };
 
 export interface ExchangePosition {
@@ -66,7 +66,7 @@ export interface Executor {
   init(bee: BeeId): Promise<void>;
   market(bee: BeeId, req: OrderReq): Promise<OrderResult>;
   /** Final outcome for an order we submitted, or null while the exchange cannot establish it. */
-  orderByClientId(bee: BeeId, instId: string, clOrdId: string): Promise<OrderResult | null>;
+  orderByClientId(bee: BeeId, instId: string, clOrdId: string, contracts: number): Promise<OrderResult | null>;
   positions(bee: BeeId): Promise<ExchangePosition[] | null>;
   fundingBills(bee: BeeId, after?: string): Promise<FundingBill[] | FundingBillPage | null>;
   /** Fees OKX charged for these order ids (USD, positive = paid). */
@@ -212,7 +212,8 @@ export class OkxExecutor implements Executor {
           continue;
         }
         if (o && (o.state === "filled" || ((o.state === "canceled" || o.state === "mmp_canceled") && Number(o.accFillSz) > 0))) {
-          return { ok: true, ordId: o.ordId ?? ack.ordId ?? null, contracts: Number(o.accFillSz), avgPx: Number(o.avgPx), feeUsd: -Number(o.fee || 0), ts: Number(o.uTime || o.cTime || Date.now()) };
+          const contracts = Number(o.accFillSz);
+          return { ok: true, ordId: o.ordId ?? ack.ordId ?? null, contracts, avgPx: Number(o.avgPx), feeUsd: -Number(o.fee || 0), ts: Number(o.uTime || o.cTime || Date.now()), ...(o.state !== "filled" || contracts < req.contracts ? { state: "partial" as const } : {}) };
         }
         if (o && o.state === "canceled") return { ok: false, error: { code: "CANCELED", message: "order canceled unfilled" }, state: "rejected" };
         await sleep(300);
@@ -268,12 +269,13 @@ export class OkxExecutor implements Executor {
     }
   }
 
-  async orderByClientId(bee: BeeId, instId: string, clOrdId: string): Promise<OrderResult | null> {
+  async orderByClientId(bee: BeeId, instId: string, clOrdId: string, expectedContracts: number): Promise<OrderResult | null> {
     try {
       const [o] = await this.run<Row[]>(bee, ["futures", "get", "--instId", instId, "--clOrdId", clOrdId]);
       if (!o || o.state === "live" || o.state === "partially_filled") return null;
       if (o.state === "filled" || ((o.state === "canceled" || o.state === "mmp_canceled") && Number(o.accFillSz) > 0)) {
-        return { ok: true, ordId: o.ordId ?? null, contracts: Number(o.accFillSz), avgPx: Number(o.avgPx), feeUsd: -Number(o.fee || 0), ts: Number(o.uTime || o.cTime || Date.now()) };
+        const contracts = Number(o.accFillSz);
+        return { ok: true, ordId: o.ordId ?? null, contracts, avgPx: Number(o.avgPx), feeUsd: -Number(o.fee || 0), ts: Number(o.uTime || o.cTime || Date.now()), ...(o.state !== "filled" || contracts < expectedContracts ? { state: "partial" as const } : {}) };
       }
       return { ok: false, error: { code: o.state === "canceled" ? "CANCELED" : "REJECTED", message: `order ${o.state ?? "not found"}` }, state: "rejected" };
     } catch (err) {

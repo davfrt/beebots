@@ -573,8 +573,9 @@ export class Engine {
           conviction: null, latencyMs: null, inputTokens: null, jevCostUsd: 0, jevError: null,
           action: { kind: "close", reason: "experiment_closed" }, vetoedBy: null, forcedBy: "experiment_closed", status: "experiment closed: closing position",
         });
-        const ok = await this.order(id, decisionId, p.instId, p.side === "long" ? "sell" : "buy", p.contracts, true, "experiment_close");
-        if (!ok) this.closeRetryAt[id] = now + 10_000;
+        const outcome = await this.order(id, decisionId, p.instId, p.side === "long" ? "sell" : "buy", p.contracts, true, "experiment_close");
+        if (outcome !== "complete") this.closeRetryAt[id] = now + 10_000;
+        if (outcome === "partial") await this.syncProtection(id);
         this.d.db.saveBee(bee, now);
       }),
     ).catch((err) => log.error("close failed", { err: safeError(err) }));
@@ -613,11 +614,11 @@ export class Engine {
         const s = ctx.view.stats.get(p.instId);
         const n = inst && s ? contractsFor(action.notionalUsd, inst, s.mid) : 0;
         if (n > 0) {
-          const ok = await this.order(id, decisionId, p.instId, p.side === "long" ? "buy" : "sell", n, false, "add");
+          const outcome = await this.order(id, decisionId, p.instId, p.side === "long" ? "buy" : "sell", n, false, "add");
           const q = this.bees[id].position;
           // An add raises the average entry; don't let it turn the position into a loser: stop to at least the new average.
-          if (ok && q && this.brain(id).protectAdds) ratchetStop(q, q.entryPx);
-          if (ok && !(await this.syncProtection(id))) await this.forceProtectionClose(id, this.now());
+          if (outcome !== "failed" && q && this.brain(id).protectAdds) ratchetStop(q, q.entryPx);
+          if (outcome !== "failed" && !(await this.syncProtection(id))) await this.forceProtectionClose(id, this.now());
         } else log.info("add rounds to zero contracts, skipped", { bee: id });
         return;
       }
@@ -644,9 +645,9 @@ export class Engine {
       log.info("order rounds to zero contracts, skipped", { bee: id, coin: inst.coin, notionalUsd });
       return;
     }
-    const ok = await this.order(id, decisionId, instId, side === "long" ? "buy" : "sell", contracts, false, "open");
+    const outcome = await this.order(id, decisionId, instId, side === "long" ? "buy" : "sell", contracts, false, "open");
     const bee = this.bees[id];
-    if (!ok || !bee.position) return;
+    if (outcome === "failed" || !bee.position) return;
     const ctx = this.ctx(id, this.now());
     const p = bee.position;
     p.stopPx = this.brain(id).stopFor(instId, side, p.entryPx, ctx);
@@ -661,9 +662,17 @@ export class Engine {
     const p = this.bees[id].position;
     if (!p) return true;
     const protection = p.protection;
-    const ok = await this.order(id, decisionId, p.instId, p.side === "long" ? "sell" : "buy", p.contracts, true, purpose);
-    if (ok && protection?.algoId) await this.d.exec.cancelProtection(id, p.instId, protection.algoId);
-    return ok;
+    const outcome = await this.order(id, decisionId, p.instId, p.side === "long" ? "sell" : "buy", p.contracts, true, purpose);
+    if (outcome !== "complete" || this.bees[id].position) {
+      await this.syncProtection(id);
+      return false;
+    }
+    if (purpose === "switch_close" && this.d.exec.kind === "okx") {
+      await this.reconcile();
+      if (!this.recon.ok || this.bees[id].position) return false;
+    }
+    if (protection?.algoId) await this.d.exec.cancelProtection(id, p.instId, protection.algoId);
+    return true;
   }
 
   private async syncProtection(id: BeeId): Promise<boolean> {
@@ -720,21 +729,21 @@ export class Engine {
     return ok;
   }
 
-  /** Record the order, send it, apply the fill. Returns true when it filled. */
-  private async order(id: BeeId, decisionId: number, instId: string, side: "buy" | "sell", contracts: number, reduceOnly: boolean, purpose: string): Promise<boolean> {
+  /** Record the order, send it, and apply confirmed quantity. */
+  private async order(id: BeeId, decisionId: number, instId: string, side: "buy" | "sell", contracts: number, reduceOnly: boolean, purpose: string): Promise<"failed" | "partial" | "complete"> {
     const { db, bus, exec } = this.d;
     const now = this.now();
     const inst = this.d.feed.view().instruments.get(instId);
-    if (!inst) return false;
+    if (!inst) return "failed";
     // After the exchange rejects a new order, this bee opens nothing for ORDER_REJECT_PAUSE_MS (it used to resend
     // every tick). Closes (reduceOnly) are never paused: stops must always try.
     if (!reduceOnly && now < (this.orderPauseUntil[id] ?? 0)) {
       log.info("new orders paused after an exchange rejection", { bee: id, coin: inst.coin, purpose, untilS: Math.round(((this.orderPauseUntil[id] ?? 0) - now) / 1000) });
-      return false;
+      return "failed";
     }
     if (!reduceOnly && db.hasUnresolvedExposureOrder(id)) {
       log.warn("new order blocked by unresolved exposure", { bee: id, purpose });
-      return false;
+      return "failed";
     }
     const clOrdId = `${id.slice(0, 2)}${now.toString(36)}${(this.seq++ % 1296).toString(36).padStart(2, "0")}`;
     const orderId = db.insertOrder({ decisionId, bee: id, ts: now, clOrdId, instId, side, contracts, reduceOnly, purpose });
@@ -749,9 +758,9 @@ export class Engine {
         this.orderPauseUntil[id] = now + ORDER_REJECT_PAUSE_MS;
         this.d.alerts.send(`${this.d.cfg.slots[id].name}: ${inst.coin} ${purpose} order rejected (${res.error.code} ${res.error.message}); new orders paused ${ORDER_REJECT_PAUSE_MS / 60_000} min`);
       }
-      return false;
+      return "failed";
     }
-    return this.applyOrderFill({ id: orderId, bee: id, instId, side, contracts, reduceOnly, purpose }, res);
+    return this.applyOrderFill({ id: orderId, bee: id, instId, side, contracts, reduceOnly, purpose }, res) ? (res.state === "partial" ? "partial" : "complete") : "failed";
   }
 
   private applyOrderFill(order: Pick<StoredOrder, "id" | "bee" | "instId" | "side" | "contracts" | "reduceOnly" | "purpose">, res: Extract<OrderResult, { ok: true }>): boolean {
@@ -770,7 +779,7 @@ export class Engine {
     }
     const notionalUsd = res.contracts * inst.ctVal * res.avgPx;
     mark(bee, res.avgPx, inst.ctVal);
-    const inserted = this.d.db.settleOrder(order.id, res.ordId, { orderId: order.id, bee: order.bee, ts: res.ts, instId: order.instId, side: order.side, contracts: res.contracts, px: res.avgPx, notionalUsd, feeUsd: res.feeUsd, realisedUsd: realised }, bee);
+    const inserted = this.d.db.settleOrder(order.id, res.ordId, res.state === "partial" ? "partial" : "filled", { orderId: order.id, bee: order.bee, ts: res.ts, instId: order.instId, side: order.side, contracts: res.contracts, px: res.avgPx, notionalUsd, feeUsd: res.feeUsd, realisedUsd: realised }, bee);
     if (!inserted) return true;
     const dir = order.reduceOnly ? "CLOSE" : order.side === "buy" ? "LONG" : "SHORT";
     this.d.bus.emit("fill", { bee: order.bee, coin: inst.coin, side: order.side, purpose: order.purpose, contracts: res.contracts, px: res.avgPx, notionalUsd: Number(notionalUsd.toFixed(2)), feeUsd: Number(res.feeUsd.toFixed(4)), realisedUsd: Number(realised.toFixed(2)), label: `${this.d.cfg.slots[order.bee].name} ${dir} ${inst.coin} $${notionalUsd.toFixed(0)}` });
@@ -971,7 +980,7 @@ export class Engine {
 
   private async recoverOrders(id: BeeId): Promise<boolean> {
     for (const order of this.d.db.unresolvedOrders(id)) {
-      const res = await this.d.exec.orderByClientId(id, order.instId, order.clOrdId);
+      const res = await this.d.exec.orderByClientId(id, order.instId, order.clOrdId, order.contracts);
       if (res === null || (!res.ok && res.state === "unknown")) return false;
       if (!res.ok) {
         this.d.db.updateOrder(order.id, "rejected", null, `${res.error.code} ${res.error.message}`);

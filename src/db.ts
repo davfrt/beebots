@@ -149,12 +149,12 @@ export class Db {
   }
 
   /** Persist the exchange outcome, ledger fill, and resulting bee state together. */
-  settleOrder(orderId: number, ordId: string | null, f: FillRow, bee: BeeState): boolean {
+  settleOrder(orderId: number, ordId: string | null, state: "filled" | "partial", f: FillRow, bee: BeeState): boolean {
     this.raw.exec("BEGIN");
     try {
       const inserted = this.raw.prepare(`INSERT OR IGNORE INTO fills (order_id, bee, ts, inst_id, side, contracts, px, notional_usd, fee_usd, realised_usd) VALUES (?,?,?,?,?,?,?,?,?,?)`)
         .run(f.orderId, f.bee, f.ts, f.instId, f.side, f.contracts, f.px, f.notionalUsd, f.feeUsd, f.realisedUsd);
-      this.raw.prepare(`UPDATE orders SET state = 'filled', ord_id = COALESCE(?, ord_id), error = NULL WHERE id = ?`).run(ordId, orderId);
+      this.raw.prepare(`UPDATE orders SET state = ?, ord_id = COALESCE(?, ord_id), error = NULL WHERE id = ?`).run(state, ordId, orderId);
       this.saveBee(bee, f.ts);
       this.raw.exec("COMMIT");
       return Number(inserted.changes) > 0;
