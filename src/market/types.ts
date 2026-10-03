@@ -94,6 +94,8 @@ export interface MarketView {
   instruments: Map<string, Instrument>;
   tickers: Map<string, Ticker>;
   stats: Map<string, CoinStats>;
+  /** Time each instrument's indicator snapshot was successfully rebuilt. */
+  statsAt: Map<string, number>;
   /** Gated crypto universe (boozy's pool), ranked by 24h volume. */
   gated: string[];
   /** Coins that passed volume but failed the spread gate (for "boozy wanted RAY" moments). */

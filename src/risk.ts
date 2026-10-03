@@ -83,6 +83,22 @@ export function capStatus(cap: CapReason, ctx: BeeContext): string {
   }
 }
 
+/** Fast path: deterministic exits that must not wait for Jev's decision cadence. */
+export function applySafetyRisk(ctx: BeeContext, brain: BeeBrain): RiskResult {
+  const { bee, view, now } = ctx;
+  const p = bee.position;
+  const { cap, tripped } = evaluateCaps(ctx);
+  const out = (action: Action, forcedBy: string | null, status: string): RiskResult => ({ action, vetoedBy: null, forcedBy, cap, capTripped: tripped, status });
+  if (cap === "retired" || cap === "loss_stop") return out(p ? { kind: "close", reason: cap } : NONE, cap, capStatus(cap, ctx));
+  if (p) {
+    const s = view.stats.get(p.instId);
+    if (s && p.stopPx !== null && (p.side === "long" ? s.mid <= p.stopPx : s.mid >= p.stopPx)) return out({ kind: "close", reason: "stop" }, "stop", `stopped out of ${p.coin}`);
+    const ts = brain.timeStopMinutes?.(ctx);
+    if (ts !== undefined && minutesSince(p.openedAt, now) >= ts) return out({ kind: "close", reason: "time_stop" }, "time_stop", `time stop on ${p.coin}`);
+  }
+  return out(NONE, null, "safety checks clear");
+}
+
 interface OpenCheck {
   ok: boolean;
   why?: string;
@@ -93,6 +109,11 @@ interface OpenCheck {
 function checkOpen(intent: Intent, input: RiskInput, conviction: number): OpenCheck {
   const { ctx, brain, sizeMult } = input;
   const { bee, view, knobs } = ctx;
+  const fresh = (instId: string) => {
+    const tickerAt = view.tickers.get(instId)?.ts;
+    const statsAt = view.statsAt.get(instId);
+    return Number.isFinite(tickerAt) && Number.isFinite(statsAt) && ctx.now - tickerAt! <= input.maxDataAgeMs && ctx.now - statsAt! <= input.maxDataAgeMs;
+  };
   const max = maxNotionalUsd(ctx) * sizeMult;
   if (!(max > 0)) return { ok: false, why: "no_equity" };
 
@@ -101,8 +122,12 @@ function checkOpen(intent: Intent, input: RiskInput, conviction: number): OpenCh
     const s = view.stats.get(p.instId);
     const inst = view.instruments.get(p.instId);
     if (!s || !inst) return { ok: false, why: "no_market_data" };
+    if (!fresh(p.instId)) return { ok: false, why: "stale_market_data" };
     if (s.spreadBp > knobs.spreadGateBps) return { ok: false, why: `spread_gate ${p.coin} ${s.spreadBp.toFixed(1)}bp` };
-    const room = max - positionNotional(p, s.mid, inst.ctVal);
+    const stop = p.initialStopPx ?? p.stopPx;
+    const lossRatio = stop === null ? 0 : (p.side === "long" ? s.mid - stop : stop - s.mid) / s.mid;
+    const riskRoom = lossRatio > 0 && Number.isFinite(lossRatio) ? (ctx.cfg.risk.maxInitialStopLossUsd - p.riskUsd) / lossRatio : Infinity;
+    const room = Math.min(max - positionNotional(p, s.mid, inst.ctVal), riskRoom);
     const n = Math.min(intent.sizeFrac * maxNotionalUsd(ctx) * sizeMult, room);
     const minUsd = inst.minSz * inst.ctVal * s.mid;
     if (n < minUsd) return { ok: false, why: "size_cap" };
@@ -113,12 +138,16 @@ function checkOpen(intent: Intent, input: RiskInput, conviction: number): OpenCh
   const s = view.stats.get(intent.instId);
   const inst = view.instruments.get(intent.instId);
   if (!s || !inst) return { ok: false, why: "no_market_data" };
+  if (!fresh(intent.instId)) return { ok: false, why: "stale_market_data" };
   if (s.spreadBp > knobs.spreadGateBps) return { ok: false, why: `spread_gate ${s.coin} ${s.spreadBp.toFixed(1)}bp` };
   if (intent.side === "long" && brain.fundingVetoLongZ !== undefined && s.fundingZ !== null && s.fundingZ > brain.fundingVetoLongZ) {
     return { ok: false, why: `funding_veto ${s.coin} z=${s.fundingZ.toFixed(1)}` };
   }
+  const stop = brain.stopFor(intent.instId, intent.side, s.mid, ctx);
+  const lossRatio = stop === null ? 0 : (intent.side === "long" ? s.mid - stop : stop - s.mid) / s.mid;
+  if (!(lossRatio > 0) || !Number.isFinite(lossRatio)) return { ok: false, why: "invalid_initial_stop" };
   const frac = Math.max(0, Math.min(1, brain.sizeFrac(intent, conviction, ctx)));
-  const n = Math.min(frac * max, max);
+  const n = Math.min(frac * max, max, ctx.cfg.risk.maxInitialStopLossUsd / lossRatio);
   const minUsd = inst.minSz * inst.ctVal * s.mid;
   if (n < minUsd) return { ok: false, why: `below_min_size ${s.coin} $${n.toFixed(2)} < $${minUsd.toFixed(2)}` };
   return { ok: true, notionalUsd: n };
@@ -143,9 +172,10 @@ function toAction(intent: Intent, notionalUsd?: number): Action {
 
 export function applyRisk(input: RiskInput): RiskResult {
   const { ctx, brain, proposal, jev } = input;
-  const { bee, view, knobs, now } = ctx;
+  const { bee, knobs, now } = ctx;
   const p = bee.position;
-  const { cap, tripped } = evaluateCaps(ctx);
+  const safety = applySafetyRisk(ctx, brain);
+  const { cap, capTripped: tripped } = safety;
   const out = (action: Action, extra: Partial<RiskResult> & { status: string }): RiskResult => ({
     action,
     vetoedBy: null,
@@ -155,29 +185,15 @@ export function applyRisk(input: RiskInput): RiskResult {
     ...extra,
   });
 
-  // 1. Retired / daily loss stop: go flat and stay flat. Forcing is suspended.
-  if (cap === "retired" || cap === "loss_stop") {
-    const status = capStatus(cap, ctx);
-    if (p) return out({ kind: "close", reason: cap }, { forcedBy: cap, vetoedBy: proposal ? cap : null, status });
-    return out(NONE, { vetoedBy: proposal ? cap : null, status });
-  }
-
-  // 2. Code stops fire whatever Jev says, and even when Jev is down.
-  if (p) {
-    const s = view.stats.get(p.instId);
-    if (s && p.stopPx !== null) {
-      const hit = p.side === "long" ? s.mid <= p.stopPx : s.mid >= p.stopPx;
-      if (hit) return out({ kind: "close", reason: "stop" }, { forcedBy: "stop", vetoedBy: proposal ? "stop" : null, status: `stopped out of ${p.coin}` });
-    }
-    const ts = brain.timeStopMinutes?.(ctx);
-    if (ts !== undefined && minutesSince(p.openedAt, now) >= ts) {
-      return out({ kind: "close", reason: "time_stop" }, { forcedBy: "time_stop", vetoedBy: proposal ? "time_stop" : null, status: `time stop on ${p.coin}` });
-    }
-  }
+  // 1-2. Caps and code stops fire whatever Jev says, and even when Jev is down.
+  if (safety.action.kind !== "none" || cap === "retired" || cap === "loss_stop") return { ...safety, vetoedBy: proposal ? safety.forcedBy : null };
 
   // 3. Jev fail-closed: hold whatever we have, open nothing.
   if (jev === "daily_cap") return out(NONE, { vetoedBy: "jev_daily_cap", status: "Jev daily cap hit: all bees hold" });
   if (jev === "unreachable" || (jev === "ok" && !proposal)) return out(NONE, { vetoedBy: "jev_unreachable", status: "Jev unreachable: holding" });
+  if (proposal && (!Number.isFinite(proposal.prob) || proposal.prob < 0 || proposal.prob > 1 || !Number.isFinite(proposal.conviction) || proposal.conviction < 0 || proposal.conviction > 3)) {
+    return out(NONE, { vetoedBy: "invalid_jev_numerics", status: "invalid Jev numerics: holding" });
+  }
 
   let intent: Intent = proposal?.intent ?? { kind: "hold" };
   let vetoedBy: string | null = null;

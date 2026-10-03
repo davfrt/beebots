@@ -124,6 +124,11 @@ export class Jev {
       const c = r.answers.conviction as SDK.ScoreResponse;
       const inputTokens = r.usage?.input_tokens ?? 0;
       const costUsd = (inputTokens * this.opts.usdPerMTok) / 1e6;
+      const valid = Number.isFinite(a.confidence) && a.confidence >= 0 && a.confidence <= 1
+        && Object.values(a.probabilities).every((p) => Number.isFinite(p) && p >= 0 && p <= 1)
+        && Number.isFinite(c.score) && c.score >= 0 && c.score <= conv.length - 1
+        && Number.isSafeInteger(inputTokens) && inputTokens >= 0 && Number.isFinite(costUsd) && costUsd >= 0;
+      if (!valid) return { ok: false, reason: "error", error: { code: "INVALID_NUMERICS", message: "invalid Jev response numerics" }, latencyMs };
       this.rollDay();
       this.spentTodayUsd += costUsd;
       this.backoffStep = 0;

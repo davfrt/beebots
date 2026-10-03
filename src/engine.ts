@@ -618,6 +618,7 @@ export class Engine {
           const q = this.bees[id].position;
           // An add raises the average entry; don't let it turn the position into a loser: stop to at least the new average.
           if (outcome !== "failed" && q && this.brain(id).protectAdds) ratchetStop(q, q.entryPx);
+          if (outcome !== "failed" && !(await this.enforceExposure(id, decisionId, "fill_excess"))) return;
           if (outcome !== "failed" && !(await this.syncProtection(id))) await this.forceProtectionClose(id, this.now());
         } else log.info("add rounds to zero contracts, skipped", { bee: id });
         return;
@@ -655,7 +656,27 @@ export class Engine {
     const notional = positionNotional(p, p.entryPx, inst.ctVal);
     p.riskUsd = p.stopPx !== null ? (notional * Math.abs(p.entryPx - p.stopPx)) / p.entryPx : notional * 0.01;
     if (s.trend) p.entryScore = s.trend.score;
+    if (!(await this.enforceExposure(id, decisionId, "fill_excess"))) return;
     if (!(await this.syncProtection(id))) await this.forceProtectionClose(id, this.now());
+  }
+
+  /** A gap can make a confirmed fill exceed the approved notional or initial-stop budget. */
+  private async enforceExposure(id: BeeId, decisionId: number, purpose: string): Promise<boolean> {
+    const p = this.bees[id].position;
+    if (!p) return true;
+    const ctx = this.ctx(id, this.now());
+    const inst = ctx.view.instruments.get(p.instId);
+    const stop = p.initialStopPx ?? p.stopPx;
+    if (!inst || stop === null) return this.closePosition(id, decisionId, purpose);
+    const lossPerContract = inst.ctVal * Math.abs(p.entryPx - stop);
+    const byNotional = Math.floor(maxNotionalUsd(ctx) / (inst.ctVal * p.entryPx));
+    const byRisk = lossPerContract > 0 ? Math.floor(ctx.cfg.risk.maxInitialStopLossUsd / lossPerContract) : 0;
+    const safe = roundToLot(Math.min(byNotional, byRisk), inst);
+    if (safe >= p.contracts) return true;
+    if (safe < inst.minSz) return this.closePosition(id, decisionId, purpose);
+    const outcome = await this.order(id, decisionId, p.instId, p.side === "long" ? "sell" : "buy", p.contracts - safe, true, purpose);
+    const remaining = this.bees[id].position;
+    return outcome !== "failed" && !!remaining && remaining.contracts <= safe || await this.closePosition(id, decisionId, purpose);
   }
 
   private async closePosition(id: BeeId, decisionId: number, purpose: string): Promise<boolean> {
@@ -711,6 +732,7 @@ export class Engine {
       return false;
     }
     p.protection = { algoId: res.algoId, stopPx: res.triggerPx, contracts: p.contracts };
+    if (!(await this.d.exec.protectionMatches(id, { instId: p.instId, closeSide: p.side === "long" ? "sell" : "buy", contracts: p.contracts, triggerPx: canonicalStop, algoId: res.algoId }))) return false;
     this.protectionVerified.add(id);
     this.d.db.saveBee(this.bees[id], this.now());
     return true;
@@ -719,6 +741,8 @@ export class Engine {
   private async forceProtectionClose(id: BeeId, now: number): Promise<boolean> {
     const p = this.bees[id].position;
     if (!p) return true;
+    this.d.bus.emit("status", { event: "critical", severity: "critical", bee: id, detail: "exchange protection failed; flattening position" }, now);
+    this.d.alerts.send(`${this.d.cfg.slots[id].name}: critical protection failure; flattening position`);
     const decisionId = this.d.db.insertDecision({
       bee: id, ts: now, stateHash: "", stateJson: "{}", menuJson: "[]", choice: null, probabilities: null,
       confidence: null, conviction: null, latencyMs: null, inputTokens: null, jevCostUsd: 0, jevError: null,
@@ -748,7 +772,9 @@ export class Engine {
     const clOrdId = `${id.slice(0, 2)}${now.toString(36)}${(this.seq++ % 1296).toString(36).padStart(2, "0")}`;
     const orderId = db.insertOrder({ decisionId, bee: id, ts: now, clOrdId, instId, side, contracts, reduceOnly, purpose });
     bus.emit("order", { bee: id, coin: inst.coin, side, contracts, purpose, clOrdId, state: "sent" }, now);
-    const res = await exec.market(id, { instId, side, contracts, reduceOnly, clOrdId });
+    const ticker = this.d.feed.view().tickers.get(instId);
+    const limitPx = !reduceOnly && ticker ? side === "buy" ? ticker.ask * 1.005 : ticker.bid * 0.995 : undefined;
+    const res = await exec.market(id, { instId, side, contracts, reduceOnly, clOrdId, ...(limitPx ? { limitPx } : {}) });
     if (!res.ok) {
       db.updateOrder(orderId, res.state, null, `${res.error.code} ${res.error.message}`);
       bus.emit("order", { bee: id, coin: inst.coin, side, contracts, purpose, state: res.state, error: res.error });
@@ -765,7 +791,7 @@ export class Engine {
 
   private applyOrderFill(order: Pick<StoredOrder, "id" | "bee" | "instId" | "side" | "contracts" | "reduceOnly" | "purpose">, res: Extract<OrderResult, { ok: true }>): boolean {
     const inst = this.d.feed.view().instruments.get(order.instId);
-    if (!inst) return false;
+    if (!inst || !Number.isFinite(res.contracts) || !(res.contracts > 0) || !Number.isFinite(res.avgPx) || !(res.avgPx > 0) || !Number.isFinite(res.feeUsd)) return false;
     const bee = this.bees[order.bee];
     const opening = !bee.position && !order.reduceOnly;
     const realised = applyFill(bee, { instId: order.instId, coin: inst.coin, side: order.side, contracts: res.contracts, px: res.avgPx, feeUsd: res.feeUsd, ctVal: inst.ctVal, ts: res.ts });

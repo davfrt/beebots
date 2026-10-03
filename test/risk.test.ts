@@ -99,6 +99,14 @@ describe("code stops", () => {
 });
 
 describe("Jev fail-closed", () => {
+  it("rejects non-finite or out-of-range proposal numerics before opening", () => {
+    for (const proposal of [prop(open(SOL.instId), Number.NaN), prop(open(SOL.instId), 1.1), prop(open(SOL.instId), 0.9, Number.POSITIVE_INFINITY)]) {
+      const r = run(ctx("boozy", bee("boozy"), V), boozy, proposal);
+      expect(r.action.kind).toBe("none");
+      expect(r.vetoedBy).toBe("invalid_jev_numerics");
+    }
+  });
+
   it("unreachable: holds a position and opens nothing, even when flat past the limit", () => {
     const flat = bee("boozy", { flatSince: NOW - 3_600_000 });
     const r = run(ctx("boozy", flat, V), boozy, null, "unreachable");
@@ -173,7 +181,8 @@ describe("bizzy: waits for her breakout", () => {
   });
 
   it("takes the breakout at full size (2x)", () => {
-    const r = run(ctx("bizzy", bee("bizzy"), V), bizzy, prop(open(SOL.instId, "long", "strict", 1)));
+    const breakout = coin("SOL", { breakout: { dayOpen: 99, prevRange: 4, trigger: 101 } });
+    const r = run(ctx("bizzy", bee("bizzy"), view([breakout])), bizzy, prop(open(breakout.instId, "long", "strict", 1)));
     expect(r.action).toMatchObject({ kind: "open" });
     expect((r.action as { notionalUsd: number }).notionalUsd).toBeCloseTo(666 * MARGIN_HEADROOM, 5);
   });
@@ -283,6 +292,13 @@ describe("no hold while flat, and menu sanity", () => {
 });
 
 describe("size cap: 2x and the absolute ceiling", () => {
+  it("shrinks a wide initial stop to the configured loss budget", () => {
+    const cfg = testConfig({ MAX_INITIAL_STOP_LOSS_USD: "10" });
+    const wideStop = { ...boozy, stopFor: (_instId: string, side: "long" | "short", entry: number) => side === "long" ? entry * 0.5 : entry * 1.5 };
+    const r = run(ctx("boozy", bee("boozy"), V, cfg), wideStop, prop(open(SOL.instId)));
+    expect(r.action).toMatchObject({ kind: "open", notionalUsd: 20 });
+  });
+
   it("never exceeds MAX_LEVERAGE x equity", () => {
     const r = run(ctx("boozy", bee("boozy", { equityUsd: 200, dayStartEquityUsd: 200 }), V), boozy, prop(open(SOL.instId), 0.9, 3));
     expect((r.action as { notionalUsd: number }).notionalUsd).toBeCloseTo(400 * MARGIN_HEADROOM, 5);
@@ -318,6 +334,12 @@ describe("size cap: 2x and the absolute ceiling", () => {
 });
 
 describe("stale data", () => {
+  it("blocks an otherwise fresh market when the selected instrument's indicators are stale", () => {
+    const stale = view([SOL], { statsAt: new Map([[SOL.instId, NOW - 211_000]]) });
+    const r = run(ctx("boozy", bee("boozy"), stale), boozy, prop(open(SOL.instId)));
+    expect(r.vetoedBy).toBe("stale_market_data");
+  });
+
   it("blocks opens on stale market data but still lets a close through", () => {
     const stale = { dataAgeMs: 300_000 };
     expect(run(ctx("boozy", bee("boozy"), V), boozy, prop(open(SOL.instId)), "ok", stale).vetoedBy).toBe("stale_market_data");

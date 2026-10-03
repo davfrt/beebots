@@ -68,6 +68,7 @@ export class MarketFeed {
   private instruments = new Map<string, Instrument>();
   private tickers = new Map<string, Ticker>();
   private stats = new Map<string, CoinStats>();
+  private statsAt = new Map<string, number>();
   private gated: string[] = [];
   private spreadBlocked: string[] = [];
   private oiHistory = new Map<string, Array<[number, number]>>();
@@ -90,6 +91,7 @@ export class MarketFeed {
       instruments: this.instruments,
       tickers: this.tickers,
       stats: this.stats,
+      statsAt: this.statsAt,
       gated: this.gated,
       spreadBlocked: this.spreadBlocked,
       newsAvailable: this.newsAvailable,
@@ -144,6 +146,7 @@ export class MarketFeed {
     const want = [...new Set([...this.gated, ...trendIds, ...this.heldInstIds()])].filter((id) => this.instruments.has(id) && tickers.has(id));
 
     const next = new Map<string, CoinStats>();
+    const nextAt = new Map<string, number>();
     await Promise.all(
       want.map(async (id) => {
         const inst = this.instruments.get(id)!;
@@ -166,6 +169,7 @@ export class MarketFeed {
           if (c4h) s.trend = trendStats(c4h);
           s.breakout = breakoutLevels(c1h, now, BREAKOUT_K);
           next.set(id, s);
+          nextAt.set(id, now);
         } catch (err) {
           log.warn("market data failed for coin", { instId: id, err: safeError(err) });
           const old = this.stats.get(id);
@@ -189,6 +193,7 @@ export class MarketFeed {
     }
 
     this.stats = next;
+    this.statsAt = nextAt;
     this.lastRefreshAt = now;
   }
 

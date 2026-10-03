@@ -60,9 +60,10 @@ const numericLimits: Record<string, z.ZodNumber> = {
   DATA_REFRESH_MS: timerMs.min(15_000),
   ENGINE_PORT: z.number().int().min(1).max(65535),
   MAX_FLAT_MINUTES: minutes,
-  LIVE_RAMP_HOURS: z.number().max(Number.MAX_SAFE_INTEGER / 3_600_000),
+  LIVE_RAMP_HOURS: z.number().positive().max(168),
   BEE_START_EQUITY_USD: z.number().positive(),
   MAX_LEVERAGE: z.number().positive().max(2, "must be in (0, 2]. Hard rule 3."),
+  MAX_INITIAL_STOP_LOSS_USD: z.number().positive(),
   DAILY_LOSS_STOP_PCT: z.number().positive().lt(100),
   PORTFOLIO_DAILY_LOSS_PCT: z.number().positive().lt(100),
   BEE_RETIRE_AT_PCT: z.number().positive().max(100),
@@ -78,11 +79,11 @@ const numericLimits: Record<string, z.ZodNumber> = {
 
 // Per-style knobs: BIZZY_* = Breakout, BREEZY_* = Trend, BOOZY_* = Momentum. Every bee on that style uses them.
 const perStyle = (prefix: string, d: { trades: number; fee: number; spread: number; cooldown: number; stopAtr: number; maxFlat: number }) => ({
-  [`${prefix}_MAX_TRADES_PER_DAY`]: num(d.trades).pipe(z.number().int()),
+  [`${prefix}_MAX_TRADES_PER_DAY`]: num(d.trades).pipe(z.number().int().max(100)),
   [`${prefix}_FEE_BUDGET_USD_DAY`]: num(d.fee),
-  [`${prefix}_SPREAD_GATE_BPS`]: num(d.spread).pipe(z.number().max(10_000)),
-  [`${prefix}_COOLDOWN_MINUTES`]: num(d.cooldown).pipe(minutes),
-  [`${prefix}_STOP_ATR_MULT`]: num(d.stopAtr).pipe(z.number().positive()),
+  [`${prefix}_SPREAD_GATE_BPS`]: num(d.spread).pipe(z.number().max(100)),
+  [`${prefix}_COOLDOWN_MINUTES`]: num(d.cooldown).pipe(minutes.positive()),
+  [`${prefix}_STOP_ATR_MULT`]: num(d.stopAtr).pipe(z.number().positive().max(10)),
   [`${prefix}_MAX_FLAT_MINUTES`]: num(d.maxFlat).pipe(minutes),
 });
 // Per-bee OKX keys (demo or live only): BEE1_OKX_API_KEY, BEE1_OKX_DEMO_API_KEY, ...
@@ -99,13 +100,15 @@ const EnvSchema = z.object({
   // DRY_RUN=true (the default) forces MODE=dry whatever MODE says. Going to demo or live needs both DRY_RUN=false and MODE set.
   DRY_RUN: bool(true),
   MODE: z.enum(["dry", "demo", "live"]).optional().default("dry"),
+  COMPETITION_MODE: bool(false),
 
   TYPESAFE_API_KEY: opt,
   JEV_MODEL: str("jev-1.13.0"),
   JEV_TIMEOUT_MS: num(2000),
   JEV_DAILY_USD_CAP: num(2),
   JEV_USD_PER_MTOK: num(0.042),
-  TICK_MS: num(10_000),
+  TICK_MS: num(60_000),
+  SAFETY_TICK_MS: num(10_000),
   DATA_REFRESH_MS: num(60_000),
 
   OKX_SITE: z.literal("eea").optional().default("eea"),
@@ -114,9 +117,11 @@ const EnvSchema = z.object({
 
   BEE_START_EQUITY_USD: num(333),
   MAX_LEVERAGE: num(2),
+  MAX_INITIAL_STOP_LOSS_USD: num(25),
   MARGIN_MODE: z.literal("isolated").optional().default("isolated"),
   MAX_NOTIONAL_USD_PER_BEE: num(700),
   DAILY_LOSS_STOP_PCT: num(8),
+  PORTFOLIO_DAILY_LOSS_PCT: num(1),
   BEE_RETIRE_AT_PCT: num(40),
   MAX_FLAT_MINUTES: num(30),
   LIVE_SIZE_MULTIPLIER: num(0.25),
@@ -168,6 +173,13 @@ const EnvSchema = z.object({
     const result = limit.safeParse(value);
     if (!result.success) for (const issue of result.error.issues) ctx.addIssue({ ...issue, path: [name] });
   }
+  for (const style of ["BIZZY", "BREEZY", "BOOZY"]) {
+    const name = `${style}_FEE_BUDGET_USD_DAY`;
+    const feeBudget = (values as Record<string, unknown>)[name];
+    if (typeof feeBudget === "number" && feeBudget > values.BEE_START_EQUITY_USD * values.DAILY_LOSS_STOP_PCT / 100) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: [name], message: "must not exceed the configured daily-loss amount" });
+    }
+  }
 });
 
 export interface BeeKnobs {
@@ -210,11 +222,13 @@ export interface Config {
   settingsPath: string;
   jev: { apiKey: string; model: string; timeoutMs: number; dailyUsdCap: number; usdPerMTok: number };
   tickMs: number;
+  safetyTickMs: number;
   dataRefreshMs: number;
   okx: { site: "eea"; apiBase: string; cliTimeoutMs: number };
   risk: {
     startEquityUsd: number;
     maxLeverage: number;
+    maxInitialStopLossUsd: number;
     maxNotionalUsdPerBee: number;
     dailyLossStopPct: number;
     retireAtPct: number;
@@ -235,6 +249,7 @@ export interface Config {
   dbPath: string;
   logLevel: "debug" | "info" | "warn" | "error";
   alertWebhookUrl?: string;
+  competition: { enabled: boolean; portfolioDailyLossPct: number };
 }
 
 export class ConfigError extends Error {}
@@ -268,7 +283,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, settings: Setti
   const creds: Partial<Record<BeeId, OkxCreds>> = {};
   if (mode !== "dry") {
     const infix = mode === "demo" ? "OKX_DEMO_API" : "OKX_API";
-    for (const bee of BEES) {
+    for (const bee of (e.COMPETITION_MODE ? BEES.slice(0, 2) : BEES)) {
       const p = bee.toUpperCase();
       const k = e[`${p}_${infix}_KEY`] as string | undefined;
       const s = e[`${p}_${infix}_SECRET`] as string | undefined;
@@ -312,11 +327,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, settings: Setti
       usdPerMTok: e.JEV_USD_PER_MTOK,
     },
     tickMs: Math.max(1000, e.TICK_MS),
+    safetyTickMs: Math.max(1000, e.SAFETY_TICK_MS),
     dataRefreshMs: Math.max(15_000, e.DATA_REFRESH_MS),
     okx: { site: e.OKX_SITE, apiBase: e.OKX_API_BASE.replace(/\/+$/, ""), cliTimeoutMs: e.OKX_CLI_TIMEOUT_MS },
     risk: {
       startEquityUsd: e.BEE_START_EQUITY_USD,
       maxLeverage: e.MAX_LEVERAGE,
+      maxInitialStopLossUsd: e.MAX_INITIAL_STOP_LOSS_USD,
       maxNotionalUsdPerBee: e.MAX_NOTIONAL_USD_PER_BEE,
       dailyLossStopPct: e.DAILY_LOSS_STOP_PCT,
       retireAtPct: e.BEE_RETIRE_AT_PCT,
@@ -335,5 +352,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, settings: Setti
     dbPath: e.DB_PATH.replaceAll("{mode}", mode),
     logLevel: e.LOG_LEVEL,
     alertWebhookUrl: e.ALERT_WEBHOOK_URL,
+    competition: { enabled: e.COMPETITION_MODE, portfolioDailyLossPct: e.PORTFOLIO_DAILY_LOSS_PCT },
   };
 }

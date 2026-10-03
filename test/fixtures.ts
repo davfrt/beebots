@@ -56,6 +56,7 @@ export function view(stats: CoinStats[], over: Partial<MarketView> = {}): Market
     instruments,
     tickers,
     stats: new Map(stats.map((s) => [s.instId, s])),
+    statsAt: new Map(stats.map((s) => [s.instId, NOW])),
     gated: stats.map((s) => s.instId),
     spreadBlocked: [],
     newsAvailable: false,

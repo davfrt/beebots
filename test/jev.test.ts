@@ -76,6 +76,13 @@ describe("Jev client", () => {
     expect(await new Jev({ ...base, client: fake(bad) }).decide(ask)).toMatchObject({ ok: false, error: { code: "OFF_MENU" } });
   });
 
+  it("rejects malformed response numerics without charging the daily budget", async () => {
+    const bad = { ...answers, action: { ...answers.action, probabilities: { APE_PENGU: 0.62, APE_BTC: Number.NaN } } };
+    const j = new Jev({ ...base, client: fake(bad) });
+    await expect(j.decide(ask)).resolves.toMatchObject({ ok: false, error: { code: "INVALID_NUMERICS" } });
+    expect(j.spentTodayUsd).toBe(0);
+  });
+
   it("never calls with an empty menu", async () => {
     const f = fake(answers);
     expect(await new Jev({ ...base, client: f }).decide({ ...ask, menu: {} })).toMatchObject({ ok: false });

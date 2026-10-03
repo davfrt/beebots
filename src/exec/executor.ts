@@ -11,6 +11,8 @@ export interface OrderReq {
   contracts: number;
   reduceOnly: boolean;
   clOrdId: string;
+  /** Required on exposure-changing OKX orders. */
+  limitPx?: number;
 }
 
 export type OrderResult =
@@ -192,9 +194,11 @@ export class OkxExecutor implements Executor {
   async market(bee: BeeId, req: OrderReq): Promise<OrderResult> {
     const inst = this.instrument(req.instId);
     if (!inst) return { ok: false, error: { code: "INST", message: "unknown instrument" }, state: "rejected" };
+    if (!req.reduceOnly && !(req.limitPx && req.limitPx > 0)) return { ok: false, error: { code: "NO_PRICE_BOUND", message: "refusing unbounded opening market order" }, state: "rejected" };
     try {
       if (!req.reduceOnly) await this.ensureLeverage(bee, req.instId);
-      const args = ["futures", "place", "--instId", req.instId, "--side", req.side, "--ordType", "market", "--sz", formatSz(req.contracts, inst), "--tdMode", "isolated", "--clOrdId", req.clOrdId];
+      const args = ["futures", "place", "--instId", req.instId, "--side", req.side, "--ordType", req.reduceOnly ? "market" : "ioc", "--sz", formatSz(req.contracts, inst), "--tdMode", "isolated", "--clOrdId", req.clOrdId];
+      if (!req.reduceOnly) args.push("--px", String(req.limitPx));
       if (req.reduceOnly) args.push("--reduceOnly");
       const [ack] = await this.run<Row[]>(bee, args);
       if (!ack || (ack.sCode && ack.sCode !== "0")) {
@@ -354,7 +358,7 @@ export class OkxExecutor implements Executor {
       if (!inst) return false;
       const trigger = Number(formatStopPx(req.triggerPx, req.closeSide, inst));
       const rows = await this.run<Row[]>(bee, ["futures", "algo", "orders", "--instId", req.instId, "--ordType", "conditional"]);
-      return rows.some((r) => r.algoId === req.algoId && (!r.state || r.state === "live") && r.side === req.closeSide && Math.abs(Number(r.sz) - req.contracts) < 1e-9 && Number(r.slTriggerPx) === trigger && /^(true|1)$/i.test(r.reduceOnly ?? ""));
+      return rows.some((r) => r.algoId === req.algoId && (!r.state || r.state === "live") && r.side === req.closeSide && Math.abs(Number(r.sz) - req.contracts) < 1e-9 && Number(r.slTriggerPx) === trigger && r.slTriggerPxType === "mark" && r.slOrdPx === "-1" && /^(true|1)$/i.test(r.reduceOnly ?? ""));
     } catch (err) {
       log.warn("protective stop verification failed", { bee, err: safeError(err) });
       return false;
