@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Alerts } from "../src/alerts.js";
 import { Db } from "../src/db.js";
 import { Engine } from "../src/engine.js";
@@ -17,6 +20,7 @@ function fakeExchange(positions: () => ExchangePosition[] | null, sent: string[]
       sent.push(req.clOrdId);
       return { ok: true, ordId: "order-1", contracts: req.contracts, avgPx: 100, feeUsd: 0, ts: NOW };
     },
+    async orderByClientId() { return null; },
     async positions() { return positions(); },
     async fundingBills() { return []; },
     async feesFor() { return new Map(); },
@@ -46,6 +50,59 @@ function fundingPages(bills: FundingBill[]): Map<string, FundingBillPage> {
 }
 
 describe("exchange reconciliation readiness", () => {
+  it("settles an unknown order by client order ID exactly once", async () => {
+    const cfg = testConfig({ DRY_RUN: "true" });
+    const market = view([coin("ENA")]);
+    const feed = { view: () => market, refresh: async () => {}, refreshTickers: async () => {}, lastRefreshAt: NOW } as unknown as MarketFeed;
+    const db = new Db(":memory:");
+    const decisionId = db.insertDecision({
+      bee: "bee1", ts: NOW, stateHash: "", stateJson: "{}", menuJson: "[]", choice: null, probabilities: null,
+      confidence: null, conviction: null, latencyMs: null, inputTokens: null, jevCostUsd: 0, jevError: null,
+      action: { kind: "open", instId: "ENA-USD_UM_XPERP-310404", side: "long" }, vetoedBy: null, forcedBy: null, status: "test",
+    });
+    const orderId = db.insertOrder({ decisionId, bee: "bee1", ts: NOW, clOrdId: "bee1-timeout", instId: "ENA-USD_UM_XPERP-310404", side: "buy", contracts: 2, reduceOnly: false, purpose: "open" });
+    db.updateOrder(orderId, "unknown", null, "timeout");
+    const exec = fakeExchange(() => [{ instId: "ENA-USD_UM_XPERP-310404", pos: 2, avgPx: 100 }], []);
+    exec.orderByClientId = async () => ({ ok: true, ordId: "order-1", contracts: 2, avgPx: 100, feeUsd: 0.2, ts: NOW });
+    exec.accountEquity = async () => 332.8;
+    const engine = new Engine({ cfg, db, feed, jev: new Jev({ ...cfg.jev, client: openingJev(), now: () => NOW }), exec, bus: new EventBus(db), alerts: { send() {} } as unknown as Alerts, now: () => NOW, ids: ["bee1"] });
+
+    await engine.start();
+    await engine.reconcile();
+    engine.stop();
+
+    expect(db.raw.prepare("SELECT state, ord_id AS ordId FROM orders WHERE id = ?").get(orderId)).toEqual({ state: "filled", ordId: "order-1" });
+    expect(db.raw.prepare("SELECT COUNT(*) AS n FROM fills WHERE order_id = ?").get(orderId)).toEqual({ n: 1 });
+    expect(engine.bees.bee1.totals.feesUsd).toBe(0.2);
+  });
+
+  it("does not duplicate a recovered fill after a file-backed restart", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "beebots-recovery-"));
+    const path = join(dir, "bees.sqlite");
+    const cfg = testConfig({ DRY_RUN: "true" });
+      let now = NOW;
+      const market = view([coin("ENA")]);
+      const feed = { view: () => market, refresh: async () => {}, refreshTickers: async () => {}, lastRefreshAt: NOW } as unknown as MarketFeed;
+      const db = new Db(path);
+      const decisionId = db.insertDecision({ bee: "bee1", ts: NOW, stateHash: "", stateJson: "{}", menuJson: "[]", choice: null, probabilities: null, confidence: null, conviction: null, latencyMs: null, inputTokens: null, jevCostUsd: 0, jevError: null, action: { kind: "open", instId: "ENA-USD_UM_XPERP-310404", side: "long" }, vetoedBy: null, forcedBy: null, status: "test" });
+      const orderId = db.insertOrder({ decisionId, bee: "bee1", ts: NOW, clOrdId: "bee1-crash", instId: "ENA-USD_UM_XPERP-310404", side: "buy", contracts: 2, reduceOnly: false, purpose: "open" });
+      const exec = fakeExchange(() => [{ instId: "ENA-USD_UM_XPERP-310404", pos: 2, avgPx: 100 }], []);
+      exec.orderByClientId = async () => ({ ok: true, ordId: "order-2", contracts: 2, avgPx: 100, feeUsd: 0.2, ts: NOW });
+      exec.accountEquity = async () => 332.8;
+      const first = new Engine({ cfg, db, feed, jev: new Jev({ ...cfg.jev, client: openingJev(), now: () => now }), exec, bus: new EventBus(db), alerts: { send() {} } as unknown as Alerts, now: () => now, ids: ["bee1"] });
+      await first.start();
+      first.stop();
+      db.close();
+
+      now++;
+      const restarted = new Db(path);
+      const second = new Engine({ cfg, db: restarted, feed, jev: new Jev({ ...cfg.jev, client: openingJev(), now: () => now }), exec, bus: new EventBus(restarted), alerts: { send() {} } as unknown as Alerts, now: () => now, ids: ["bee1"] });
+      await second.start();
+      second.stop();
+      expect(restarted.raw.prepare("SELECT COUNT(*) AS n FROM fills WHERE order_id = ?").get(orderId)).toEqual({ n: 1 });
+    restarted.close();
+  });
+
   it("blocks opening decisions until unreadable exchange state recovers", async () => {
     const cfg = testConfig({ DRY_RUN: "true" });
     const market = view([coin("ENA", { ret24hPct: 25, ret7dPct: 43 }), coin("SUI", { ret24hPct: 12, ret7dPct: 40 })]);

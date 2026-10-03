@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS fills (
   inst_id TEXT NOT NULL, side TEXT NOT NULL, contracts REAL NOT NULL, px REAL NOT NULL,
   notional_usd REAL NOT NULL, fee_usd REAL NOT NULL, realised_usd REAL NOT NULL
 );
+CREATE UNIQUE INDEX IF NOT EXISTS fills_order_id ON fills(order_id);
 CREATE TABLE IF NOT EXISTS funding (
   id INTEGER PRIMARY KEY, bee TEXT NOT NULL, ts INTEGER NOT NULL, inst_id TEXT,
   amount_usd REAL NOT NULL, bill_id TEXT UNIQUE
@@ -85,6 +86,11 @@ export interface FillRow {
   realisedUsd: number;
 }
 
+export interface StoredOrder extends OrderRow {
+  id: number;
+  state: "sent" | "unknown";
+}
+
 /** A fill as the Hive sees it (hive.ts): base-asset quantity, no order ids, no account data. */
 export interface HiveFill {
   slot: string;
@@ -140,6 +146,30 @@ export class Db {
     this.raw
       .prepare(`INSERT INTO fills (order_id, bee, ts, inst_id, side, contracts, px, notional_usd, fee_usd, realised_usd) VALUES (?,?,?,?,?,?,?,?,?,?)`)
       .run(f.orderId, f.bee, f.ts, f.instId, f.side, f.contracts, f.px, f.notionalUsd, f.feeUsd, f.realisedUsd);
+  }
+
+  /** Persist the exchange outcome, ledger fill, and resulting bee state together. */
+  settleOrder(orderId: number, ordId: string | null, f: FillRow, bee: BeeState): boolean {
+    this.raw.exec("BEGIN");
+    try {
+      const inserted = this.raw.prepare(`INSERT OR IGNORE INTO fills (order_id, bee, ts, inst_id, side, contracts, px, notional_usd, fee_usd, realised_usd) VALUES (?,?,?,?,?,?,?,?,?,?)`)
+        .run(f.orderId, f.bee, f.ts, f.instId, f.side, f.contracts, f.px, f.notionalUsd, f.feeUsd, f.realisedUsd);
+      this.raw.prepare(`UPDATE orders SET state = 'filled', ord_id = COALESCE(?, ord_id), error = NULL WHERE id = ?`).run(ordId, orderId);
+      this.saveBee(bee, f.ts);
+      this.raw.exec("COMMIT");
+      return Number(inserted.changes) > 0;
+    } catch (err) {
+      this.raw.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
+  unresolvedOrders(bee: BeeId): StoredOrder[] {
+    return this.raw.prepare(`SELECT id, decision_id AS decisionId, bee, ts, cl_ord_id AS clOrdId, inst_id AS instId, side, contracts, reduce_only AS reduceOnly, purpose, state FROM orders WHERE bee = ? AND state IN ('sent', 'unknown') ORDER BY id`).all(bee) as unknown as StoredOrder[];
+  }
+
+  hasUnresolvedExposureOrder(bee: BeeId): boolean {
+    return !!this.raw.prepare(`SELECT 1 FROM orders WHERE bee = ? AND state IN ('sent', 'unknown') LIMIT 1`).get(bee);
   }
 
   /**

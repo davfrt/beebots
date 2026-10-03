@@ -65,6 +65,8 @@ export interface Executor {
   readonly kind: "sim" | "okx";
   init(bee: BeeId): Promise<void>;
   market(bee: BeeId, req: OrderReq): Promise<OrderResult>;
+  /** Final outcome for an order we submitted, or null while the exchange cannot establish it. */
+  orderByClientId(bee: BeeId, instId: string, clOrdId: string): Promise<OrderResult | null>;
   positions(bee: BeeId): Promise<ExchangePosition[] | null>;
   fundingBills(bee: BeeId, after?: string): Promise<FundingBill[] | FundingBillPage | null>;
   /** Fees OKX charged for these order ids (USD, positive = paid). */
@@ -102,6 +104,10 @@ export class SimExecutor implements Executor {
     const px = req.side === "buy" ? (t.ask > 0 ? t.ask : t.last) : t.bid > 0 ? t.bid : t.last;
     const feeUsd = req.contracts * inst.ctVal * px * this.takerFeeRate;
     return { ok: true, ordId: null, contracts: req.contracts, avgPx: px, feeUsd, ts: this.now() };
+  }
+
+  async orderByClientId(): Promise<null> {
+    return null;
   }
 
   async positions(): Promise<null> {
@@ -258,6 +264,20 @@ export class OkxExecutor implements Executor {
       return out;
     } catch (err) {
       log.warn("fills read failed", { bee, err: safeError(err) });
+      return null;
+    }
+  }
+
+  async orderByClientId(bee: BeeId, instId: string, clOrdId: string): Promise<OrderResult | null> {
+    try {
+      const [o] = await this.run<Row[]>(bee, ["futures", "get", "--instId", instId, "--clOrdId", clOrdId]);
+      if (!o || o.state === "live" || o.state === "partially_filled") return null;
+      if (o.state === "filled" || ((o.state === "canceled" || o.state === "mmp_canceled") && Number(o.accFillSz) > 0)) {
+        return { ok: true, ordId: o.ordId ?? null, contracts: Number(o.accFillSz), avgPx: Number(o.avgPx), feeUsd: -Number(o.fee || 0), ts: Number(o.uTime || o.cTime || Date.now()) };
+      }
+      return { ok: false, error: { code: o.state === "canceled" ? "CANCELED" : "REJECTED", message: `order ${o.state ?? "not found"}` }, state: "rejected" };
+    } catch (err) {
+      log.warn("order recovery read failed", { bee, clOrdId, err: safeError(err) });
       return null;
     }
   }

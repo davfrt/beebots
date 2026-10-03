@@ -23,7 +23,7 @@ function fakeAccounts(over: Partial<Record<BeeId, Partial<Account>>> = {}): Exec
     positions: 0, orders: 0, conditionalOrders: 0, ...over[bee],
   }])) as Record<BeeId, Account>;
   return {
-    kind: "okx", async init() {}, async market() { throw new Error("not used"); }, async fundingBills() { return []; }, async feesFor() { return new Map(); },
+    kind: "okx", async init() {}, async market() { throw new Error("not used"); }, async orderByClientId() { return null; }, async fundingBills() { return []; }, async feesFor() { return new Map(); },
     async protect() { throw new Error("not used"); }, async cancelProtection() { return true; }, async externalClose() { return null; }, async protectionMatches() { return true; },
     async accountInfo(bee) { const a = accounts[bee]; return a.readable ? { uid: a.uid, mainUid: a.mainUid, permissions: a.permissions, ipBound: a.ipBound } : null; },
     async accountId(bee) { return accounts[bee].uid; },

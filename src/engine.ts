@@ -4,9 +4,9 @@ import { maxNotionalUsd, minutesSince, positionNotional, profitLockStop } from "
 import { coinOf, type Action, type BeeBrain, type BeeContext, type BeeState, type Position, type Side } from "./bees/types.js";
 import { BEES, type BeeId, type Config, type SlotProfile } from "./config.js";
 import type { Alerts } from "./alerts.js";
-import type { Db } from "./db.js";
+import type { Db, StoredOrder } from "./db.js";
 import type { EventBus } from "./events.js";
-import type { Executor } from "./exec/executor.js";
+import type { Executor, OrderResult } from "./exec/executor.js";
 import { contractsFor, formatStopPx, roundToLot } from "./exec/sizing.js";
 import type { Jev, JevAnswer, JevResult } from "./jev.js";
 import { applyFill, applyFunding, freshBee, mark, rollDay, sizedRiskUsd } from "./ledger.js";
@@ -647,7 +647,6 @@ export class Engine {
     const ok = await this.order(id, decisionId, instId, side === "long" ? "buy" : "sell", contracts, false, "open");
     const bee = this.bees[id];
     if (!ok || !bee.position) return;
-    bee.tradesToday++;
     const ctx = this.ctx(id, this.now());
     const p = bee.position;
     p.stopPx = this.brain(id).stopFor(instId, side, p.entryPx, ctx);
@@ -733,6 +732,10 @@ export class Engine {
       log.info("new orders paused after an exchange rejection", { bee: id, coin: inst.coin, purpose, untilS: Math.round(((this.orderPauseUntil[id] ?? 0) - now) / 1000) });
       return false;
     }
+    if (!reduceOnly && db.hasUnresolvedExposureOrder(id)) {
+      log.warn("new order blocked by unresolved exposure", { bee: id, purpose });
+      return false;
+    }
     const clOrdId = `${id.slice(0, 2)}${now.toString(36)}${(this.seq++ % 1296).toString(36).padStart(2, "0")}`;
     const orderId = db.insertOrder({ decisionId, bee: id, ts: now, clOrdId, instId, side, contracts, reduceOnly, purpose });
     bus.emit("order", { bee: id, coin: inst.coin, side, contracts, purpose, clOrdId, state: "sent" }, now);
@@ -748,25 +751,29 @@ export class Engine {
       }
       return false;
     }
-    db.updateOrder(orderId, "filled", res.ordId, null);
-    const bee = this.bees[id];
-    const realised = applyFill(bee, { instId, coin: inst.coin, side, contracts: res.contracts, px: res.avgPx, feeUsd: res.feeUsd, ctVal: inst.ctVal, ts: res.ts });
+    return this.applyOrderFill({ id: orderId, bee: id, instId, side, contracts, reduceOnly, purpose }, res);
+  }
+
+  private applyOrderFill(order: Pick<StoredOrder, "id" | "bee" | "instId" | "side" | "contracts" | "reduceOnly" | "purpose">, res: Extract<OrderResult, { ok: true }>): boolean {
+    const inst = this.d.feed.view().instruments.get(order.instId);
+    if (!inst) return false;
+    const bee = this.bees[order.bee];
+    const opening = !bee.position && !order.reduceOnly;
+    const realised = applyFill(bee, { instId: order.instId, coin: inst.coin, side: order.side, contracts: res.contracts, px: res.avgPx, feeUsd: res.feeUsd, ctVal: inst.ctVal, ts: res.ts });
+    if (opening && bee.position) {
+      const p = bee.position;
+      p.stopPx = this.brain(order.bee).stopFor(order.instId, p.side, p.entryPx, this.ctx(order.bee, res.ts));
+      p.initialStopPx = p.stopPx;
+      const notional = positionNotional(p, p.entryPx, inst.ctVal);
+      p.riskUsd = p.stopPx !== null ? (notional * Math.abs(p.entryPx - p.stopPx)) / p.entryPx : notional * 0.01;
+      if (order.purpose === "open") bee.tradesToday++;
+    }
     const notionalUsd = res.contracts * inst.ctVal * res.avgPx;
-    db.insertFill({ orderId, bee: id, ts: res.ts, instId, side, contracts: res.contracts, px: res.avgPx, notionalUsd, feeUsd: res.feeUsd, realisedUsd: realised });
     mark(bee, res.avgPx, inst.ctVal);
-    const dir = reduceOnly ? "CLOSE" : side === "buy" ? "LONG" : "SHORT";
-    bus.emit("fill", {
-      bee: id,
-      coin: inst.coin,
-      side,
-      purpose,
-      contracts: res.contracts,
-      px: res.avgPx,
-      notionalUsd: Number(notionalUsd.toFixed(2)),
-      feeUsd: Number(res.feeUsd.toFixed(4)),
-      realisedUsd: Number(realised.toFixed(2)),
-      label: `${this.d.cfg.slots[id].name} ${dir} ${inst.coin} $${notionalUsd.toFixed(0)}`,
-    });
+    const inserted = this.d.db.settleOrder(order.id, res.ordId, { orderId: order.id, bee: order.bee, ts: res.ts, instId: order.instId, side: order.side, contracts: res.contracts, px: res.avgPx, notionalUsd, feeUsd: res.feeUsd, realisedUsd: realised }, bee);
+    if (!inserted) return true;
+    const dir = order.reduceOnly ? "CLOSE" : order.side === "buy" ? "LONG" : "SHORT";
+    this.d.bus.emit("fill", { bee: order.bee, coin: inst.coin, side: order.side, purpose: order.purpose, contracts: res.contracts, px: res.avgPx, notionalUsd: Number(notionalUsd.toFixed(2)), feeUsd: Number(res.feeUsd.toFixed(4)), realisedUsd: Number(realised.toFixed(2)), label: `${this.d.cfg.slots[order.bee].name} ${dir} ${inst.coin} $${notionalUsd.toFixed(0)}` });
     return true;
   }
 
@@ -850,6 +857,10 @@ export class Engine {
     const diffs: string[] = [];
     for (const id of this.ids) {
       const bee = this.bees[id];
+      if (!(await this.recoverOrders(id))) {
+        diffs.push(`${this.d.cfg.slots[id].name}: unresolved submitted order`);
+        continue;
+      }
       const ex = await this.d.exec.positions(id);
       if (ex === null) {
         diffs.push(`${this.d.cfg.slots[id].name}: could not read OKX positions`);
@@ -956,6 +967,19 @@ export class Engine {
     this.d.db.setMeta("reconciliation_ready", ok ? "true" : "false");
     this.d.bus.emit("recon", { ok, detail: this.recon.detail }, now);
     if (!ok && was !== false) this.d.alerts.send(`reconciliation mismatch: ${this.recon.detail}`);
+  }
+
+  private async recoverOrders(id: BeeId): Promise<boolean> {
+    for (const order of this.d.db.unresolvedOrders(id)) {
+      const res = await this.d.exec.orderByClientId(id, order.instId, order.clOrdId);
+      if (res === null || (!res.ok && res.state === "unknown")) return false;
+      if (!res.ok) {
+        this.d.db.updateOrder(order.id, "rejected", null, `${res.error.code} ${res.error.message}`);
+        continue;
+      }
+      if (!this.applyOrderFill(order, res)) return false;
+    }
+    return true;
   }
 
   /** Momentum bees: who is #1 on the hourly rank, and for how many ranks in a row. */

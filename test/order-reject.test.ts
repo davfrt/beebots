@@ -35,8 +35,9 @@ describe("a rejected new order pauses that bee's new orders", () => {
       async init() {},
       async market(bee, req) {
         sent.push(`${bee}:${req.instId}:${req.reduceOnly}`);
-        return { ok: false, state: "unknown", error: { code: "51008", message: "insufficient margin" } } as never;
+        return { ok: false, state: "rejected", error: { code: "51008", message: "insufficient margin" } };
       },
+      async orderByClientId() { return null; },
       async positions() { return []; },
       async fundingBills() { return []; },
       async feesFor() { return new Map(); },
