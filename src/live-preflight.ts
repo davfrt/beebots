@@ -1,7 +1,10 @@
 import type { BeeId, Config } from "./config.js";
-import type { Executor } from "./exec/executor.js";
+import type { Executor, ExchangePosition } from "./exec/executor.js";
 
-type MetaStore = { getMeta(key: string): string | null };
+type MetaStore = {
+  getMeta(key: string): string | null;
+  loadBee(slot: BeeId): { position: { instId: string; side: "long" | "short"; contracts: number } | null } | null;
+};
 
 export interface LivePreflightResult {
   firstStart: boolean;
@@ -27,10 +30,18 @@ export async function preflightLiveAccounts({ cfg, db, exec, ids }: { cfg: Confi
     if (orders === null) throw new Error(`live preflight: ${slot} pending orders are unreadable`);
     if (conditionalOrders === null) throw new Error(`live preflight: ${slot} conditional orders are unreadable`);
     if (firstStart && positions.length) throw new Error(`live preflight: ${slot} must be flat on first start (positions found)`);
+    if (!firstStart && !matchesPersistedPosition(db.loadBee(slot)?.position ?? null, positions)) throw new Error(`live preflight: ${slot} exchange position does not match local recovery state`);
     if (orders.length) throw new Error(`live preflight: ${slot} must be flat (pending orders found)`);
     if (conditionalOrders.length) throw new Error(`live preflight: ${slot} must be flat (conditional orders found)`);
     return { account, slot, equityUsd: equity, flat: positions.length === 0 && orders.length === 0 && conditionalOrders.length === 0 };
   }));
   if (new Set(checks.map(({ account }) => account.uid)).size !== ids.length) throw new Error("live preflight: configured slots must use distinct subaccounts");
   return { firstStart, slots: checks.map(({ slot, equityUsd, flat }) => ({ slot, equityUsd, flat })) };
+}
+
+function matchesPersistedPosition(local: { instId: string; side: "long" | "short"; contracts: number } | null, exchange: ExchangePosition[]): boolean {
+  if (exchange.length !== (local ? 1 : 0)) return false;
+  if (!local) return true;
+  const position = exchange[0]!;
+  return position.instId === local.instId && Math.abs(position.pos) === local.contracts && (position.pos > 0 ? "long" : "short") === local.side;
 }
