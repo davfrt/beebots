@@ -125,18 +125,17 @@ export async function runCompetitionApp(cfg: Config): Promise<void> {
     },
   }, cfg.server.port, cfg.server.bind);
 
-  const shutdown = (sig: string) => {
+  const shutdown = async (sig: string) => {
     log.info("competition engine shutting down", { sig });
     manager?.stop();
     competition.stop();
-    paper.stop();
-    live?.stop();
+    await Promise.all([paper.shutdown(), live?.shutdown()]);
     updates.stop();
-    server.close();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
     liveDb?.close();
     paperDb.close();
     process.exit(0);
   };
-  process.on("SIGINT", () => shutdown("SIGINT"));
-  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => void shutdown("SIGINT"));
+  process.on("SIGTERM", () => void shutdown("SIGTERM"));
 }

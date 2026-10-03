@@ -156,8 +156,19 @@ export class Engine {
   }
 
   stop(): void {
-    this.stopped = true;
     for (const t of this.timers) clearTimeout(t);
+    for (const id of this.ids) this.d.db.saveBee(this.bees[id], this.now());
+  }
+
+  async shutdown(deadlineMs = 10_000): Promise<void> {
+    this.stopped = true;
+    this.stop();
+    const deadline = Date.now() + deadlineMs;
+    while ((this.ticking || this.refreshing) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+    if (this.ticking || this.refreshing) {
+      // The submitted order row is the durable recovery record for interrupted exchange work.
+      log.warn("engine shutdown deadline expired; recovery will resolve in-flight exchange work");
+    }
     for (const id of this.ids) this.d.db.saveBee(this.bees[id], this.now());
   }
 
@@ -200,7 +211,7 @@ export class Engine {
   }
 
   private async cycle(forceDecision: boolean): Promise<void> {
-    if (this.ticking) return;
+    if (this.stopped || this.ticking) return;
     this.ticking = true;
     try {
       try {
@@ -225,6 +236,7 @@ export class Engine {
         }
       }
 
+      if (this.stopped) return;
       if (this.closedAt === null && this.d.closeRequested?.()) this.beginClose(now);
       if (this.closedAt === null && this.d.takeResumeRequest?.()) await this.resumeLast(now);
       if (this.closedAt !== null) await this.windDown(now);
@@ -757,6 +769,7 @@ export class Engine {
   private async order(id: BeeId, decisionId: number, instId: string, side: "buy" | "sell", contracts: number, reduceOnly: boolean, purpose: string): Promise<"failed" | "partial" | "complete"> {
     const { db, bus, exec } = this.d;
     const now = this.now();
+    if (this.stopped) return "failed";
     const inst = this.d.feed.view().instruments.get(instId);
     if (!inst) return "failed";
     // After the exchange rejects a new order, this bee opens nothing for ORDER_REJECT_PAUSE_MS (it used to resend
@@ -886,6 +899,7 @@ export class Engine {
   /** Every 5 min (demo/live): our position and fees vs OKX. On mismatch, adopt OKX's position and go red. */
   async reconcile(): Promise<void> {
     const now = this.now();
+    if (this.stopped) return;
     this.lastReconAt = now;
     this.protectionVerified.clear();
     const view = this.d.feed.view();

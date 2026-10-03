@@ -182,17 +182,17 @@ async function main() {
     cfg.server.bind,
   );
 
-  const shutdown = (sig: string) => {
+  const shutdown = async (sig: string) => {
     log.info("shutting down", { sig });
-    engine?.stop();
+    await engine?.shutdown();
     hive.stop();
     updates.stop();
-    server.close();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
     db.close();
     process.exit(0);
   };
-  process.on("SIGINT", () => shutdown("SIGINT"));
-  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => void shutdown("SIGINT"));
+  process.on("SIGTERM", () => void shutdown("SIGTERM"));
 }
 
 main().catch((err) => {
