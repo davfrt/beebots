@@ -27,8 +27,8 @@ export async function preflightLiveAccounts({ cfg, db, exec, ids }: { cfg: Confi
     if (orders === null) throw new Error(`live preflight: ${slot} pending orders are unreadable`);
     if (conditionalOrders === null) throw new Error(`live preflight: ${slot} conditional orders are unreadable`);
     if (firstStart && positions.length) throw new Error(`live preflight: ${slot} must be flat on first start (positions found)`);
-    if (firstStart && orders.length) throw new Error(`live preflight: ${slot} must be flat on first start (pending orders found)`);
-    if (firstStart && conditionalOrders.length) throw new Error(`live preflight: ${slot} must be flat on first start (conditional orders found)`);
+    if (orders.length) throw new Error(`live preflight: ${slot} must be flat (pending orders found)`);
+    if (conditionalOrders.length) throw new Error(`live preflight: ${slot} must be flat (conditional orders found)`);
     return { account, slot, equityUsd: equity, flat: positions.length === 0 && orders.length === 0 && conditionalOrders.length === 0 };
   }));
   if (new Set(checks.map(({ account }) => account.uid)).size !== ids.length) throw new Error("live preflight: configured slots must use distinct subaccounts");

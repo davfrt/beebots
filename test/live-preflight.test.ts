@@ -56,6 +56,7 @@ describe("live account preflight", () => {
     await expect(preflightLiveAccounts({ cfg: cfg(), db, exec: fakeAccounts({ bee1: { positions: 1 } }), ids: ["bee1", "bee2"] })).rejects.toThrow("flat");
     db.setMeta("live_started_at", "1");
     await expect(preflightLiveAccounts({ cfg: cfg(), db, exec: fakeAccounts({ bee1: { positions: 1 } }), ids: ["bee1", "bee2"] })).resolves.toMatchObject({ slots: [{ slot: "bee1" }, { slot: "bee2" }] });
+    await expect(preflightLiveAccounts({ cfg: cfg(), db, exec: fakeAccounts({ bee1: { orders: 1 } }), ids: ["bee1", "bee2"] })).rejects.toThrow("pending orders");
   });
 
   it("returns redacted evidence for two distinct competition subaccounts", async () => {
