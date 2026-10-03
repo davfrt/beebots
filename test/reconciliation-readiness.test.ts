@@ -33,6 +33,8 @@ function fakeExchange(positions: () => ExchangePosition[] | null, sent: string[]
     async accountId() { return null; },
     async pendingOrders() { return []; },
     async conditionalOrders() { return []; },
+    async cancelPendingOrders() { return true; },
+    async cancelConditionalOrders() { return true; },
   };
 }
 
@@ -50,6 +52,41 @@ function fundingPages(bills: FundingBill[]): Map<string, FundingBillPage> {
 }
 
 describe("exchange reconciliation readiness", () => {
+  it("persists emergency flatten only after orders, conditionals, and a partial position close are proven flat", async () => {
+    const path = join(mkdtempSync(join(tmpdir(), "beebots-flatten-")), "bees.sqlite");
+    const cfg = testConfig({ DRY_RUN: "true" });
+    const market = view([coin("ENA")]);
+    const feed = { view: () => market, refresh: async () => {}, refreshTickers: async () => {}, lastRefreshAt: NOW } as unknown as MarketFeed;
+    let positions: ExchangePosition[] | null = [{ instId: "ENA-USD_UM_XPERP-310404", pos: 2, avgPx: 100 }];
+    let pending = [{}];
+    let conditional = [{}];
+    const sent: string[] = [];
+    const exec = fakeExchange(() => positions, sent);
+    exec.pendingOrders = async () => pending;
+    exec.conditionalOrders = async () => conditional;
+    exec.cancelPendingOrders = async () => { pending = []; return true; };
+    exec.cancelConditionalOrders = async () => { conditional = []; return true; };
+    exec.market = async (_bee, req) => {
+      sent.push(`${req.reduceOnly}:${req.contracts}`);
+      positions = req.contracts === 2 ? [{ instId: req.instId, pos: 1, avgPx: 100 }] : [];
+      return { ok: true, ordId: "close", contracts: 1, avgPx: 100, feeUsd: 0, ts: NOW, state: "partial" };
+    };
+    const db = new Db(path);
+    const engine = new Engine({ cfg, db, feed, jev: new Jev({ ...cfg.jev, client: openingJev(), now: () => NOW }), exec, bus: new EventBus(db), alerts: { send() {} } as unknown as Alerts, now: () => NOW, ids: ["bee1"], closeRequested: () => true });
+
+    await engine.start();
+    await engine.tick();
+    await engine.tick();
+    engine.stop();
+
+    expect(sent).toEqual(["true:2", "true:1"]);
+    expect(db.getMeta("experiment_flat_at")).toBe(String(NOW));
+    db.close();
+    const restarted = new Db(path);
+    expect(restarted.getMeta("experiment_closed_at")).toBe(String(NOW));
+    restarted.close();
+  });
+
   it("settles an unknown order by client order ID exactly once", async () => {
     const cfg = testConfig({ DRY_RUN: "true" });
     const market = view([coin("ENA")]);

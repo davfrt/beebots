@@ -83,6 +83,8 @@ export interface Executor {
   accountId(bee: BeeId): Promise<string | null>;
   pendingOrders(bee: BeeId): Promise<unknown[] | null>;
   conditionalOrders(bee: BeeId): Promise<unknown[] | null>;
+  cancelPendingOrders?(bee: BeeId): Promise<boolean>;
+  cancelConditionalOrders?(bee: BeeId): Promise<boolean>;
 }
 
 /**
@@ -418,6 +420,34 @@ export class OkxExecutor implements Executor {
     } catch (err) {
       log.warn("conditional orders read failed", { bee, err: safeError(err) });
       return null;
+    }
+  }
+
+  async cancelPendingOrders(bee: BeeId): Promise<boolean> {
+    try {
+      const orders = await this.run<Row[]>(bee, ["futures", "orders"]);
+      for (const order of orders) {
+        const [ack] = await this.run<Row[]>(bee, ["futures", "cancel", order.instId!, "--ordId", order.ordId!]);
+        if (!ack || (ack.sCode && ack.sCode !== "0")) return false;
+      }
+      return true;
+    } catch (err) {
+      log.warn("pending order cancellation failed", { bee, err: safeError(err) });
+      return false;
+    }
+  }
+
+  async cancelConditionalOrders(bee: BeeId): Promise<boolean> {
+    try {
+      const orders = await this.run<Row[]>(bee, ["futures", "algo", "orders", "--ordType", "conditional"]);
+      for (const order of orders) {
+        const [ack] = await this.run<Row[]>(bee, ["futures", "algo", "cancel", "--instId", order.instId!, "--algoId", order.algoId!]);
+        if (!ack || (ack.sCode && ack.sCode !== "0")) return false;
+      }
+      return true;
+    } catch (err) {
+      log.warn("conditional order cancellation failed", { bee, err: safeError(err) });
+      return false;
     }
   }
 }

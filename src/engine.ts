@@ -91,6 +91,7 @@ export class Engine {
   /** Experiment closed: no Jev calls, no new positions; open positions are closed, then the engine only marks and reconciles. */
   private closedAt: number | null = null;
   private closeRetryAt: Partial<Record<BeeId, number>> = {};
+  private closeProven: Partial<Record<BeeId, boolean>> = {};
   private closeAnnounced = false;
   private ids: readonly BeeId[];
   private lastDecisionAt = 0;
@@ -573,11 +574,31 @@ export class Engine {
     this.d.alerts.send("experiment close requested: closing all positions");
   }
 
-  /** Close whatever each bee holds (reduce-only market, through the normal ledger), then idle. */
+  /** Cancel exposure first, then close every exchange position and require an exchange-confirmed flat account. */
   private async windDown(now: number): Promise<void> {
     await Promise.all(
       this.ids.map(async (id) => {
         const bee = this.bees[id];
+        if (this.d.exec.kind === "okx") {
+          this.closeProven[id] = false;
+          if (!(await this.d.exec.cancelPendingOrders?.(id)) || !(await this.d.exec.cancelConditionalOrders?.(id))) return;
+          const positions = await this.d.exec.positions(id);
+          if (positions === null) return;
+          for (const p of positions) {
+            const decisionId = this.d.db.insertDecision({
+              bee: id, ts: now, stateHash: "", stateJson: "{}", menuJson: "[]", choice: null, probabilities: null, confidence: null,
+              conviction: null, latencyMs: null, inputTokens: null, jevCostUsd: 0, jevError: null,
+              action: { kind: "close", reason: "experiment_closed" }, vetoedBy: null, forcedBy: "experiment_closed", status: "emergency flatten: reduce-only close",
+            });
+            const outcome = await this.order(id, decisionId, p.instId, p.pos > 0 ? "sell" : "buy", Math.abs(p.pos), true, "emergency_flatten");
+            if (outcome !== "complete") this.closeRetryAt[id] = now + 10_000;
+          }
+          const [proofPositions, orders, conditionals] = await Promise.all([this.d.exec.positions(id), this.d.exec.pendingOrders(id), this.d.exec.conditionalOrders(id)]);
+          if (proofPositions === null || orders === null || conditionals === null || proofPositions.length || orders.length || conditionals.length) return;
+          if (bee.position) await this.reconcile();
+          this.closeProven[id] = true;
+          return;
+        }
         const p = bee.position;
         if (!p || now < (this.closeRetryAt[id] ?? 0)) return;
         const decisionId = this.d.db.insertDecision({
@@ -591,7 +612,7 @@ export class Engine {
         this.d.db.saveBee(bee, now);
       }),
     ).catch((err) => log.error("close failed", { err: safeError(err) }));
-    if (!this.closeAnnounced && this.ids.every((id) => !this.bees[id].position)) {
+    if (!this.closeAnnounced && (this.d.exec.kind === "okx" ? this.ids.every((id) => this.closeProven[id]) : this.ids.every((id) => !this.bees[id].position))) {
       this.closeAnnounced = true;
       this.d.db.setMeta("experiment_flat_at", String(now));
       this.lastReconAt = 0; // confirm flat against OKX on the next tick
