@@ -17,7 +17,13 @@ const bool = (def: boolean) =>
   z
     .string()
     .optional()
-    .transform((v) => (v === undefined || v.trim() === "" ? def : /^(1|true|yes|on)$/i.test(v.trim())));
+    .transform((v, ctx) => {
+      if (v === undefined || v.trim() === "") return def;
+      if (/^(1|true|yes|on)$/i.test(v.trim())) return true;
+      if (/^(0|false|no|off)$/i.test(v.trim())) return false;
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "must be true/false, 1/0, yes/no, or on/off" });
+      return z.NEVER;
+    });
 const num = (def: number) =>
   z
     .string()
@@ -30,7 +36,8 @@ const num = (def: number) =>
         return z.NEVER;
       }
       return n;
-    });
+    })
+    .pipe(z.number().nonnegative().max(Number.MAX_SAFE_INTEGER));
 const str = (def: string) =>
   z
     .string()
@@ -41,14 +48,42 @@ const opt = z
   .optional()
   .transform((v) => (v === undefined || v.trim() === "" ? undefined : v.trim()));
 
+// num() supplies the common [0, MAX_SAFE_INTEGER] bound; these settings have narrower domain limits.
+// Node timers overflow to 1 ms above this ceiling; durations must also stay safe after conversion to ms.
+const timerMs = z.number().int().positive().max(2_147_483_647);
+const minutes = z.number().max(Number.MAX_SAFE_INTEGER / 60_000);
+const numericLimits: Record<string, z.ZodNumber> = {
+  JEV_TIMEOUT_MS: timerMs,
+  OKX_CLI_TIMEOUT_MS: timerMs.max(2_147_483_647 - 2000), // execFile adds a 2 s shutdown allowance
+  TICK_MS: timerMs.min(1000),
+  SAFETY_TICK_MS: timerMs.min(1000),
+  DATA_REFRESH_MS: timerMs.min(15_000),
+  ENGINE_PORT: z.number().int().min(1).max(65535),
+  MAX_FLAT_MINUTES: minutes,
+  LIVE_RAMP_HOURS: z.number().max(Number.MAX_SAFE_INTEGER / 3_600_000),
+  BEE_START_EQUITY_USD: z.number().positive(),
+  MAX_LEVERAGE: z.number().positive().max(2, "must be in (0, 2]. Hard rule 3."),
+  DAILY_LOSS_STOP_PCT: z.number().positive().lt(100),
+  PORTFOLIO_DAILY_LOSS_PCT: z.number().positive().lt(100),
+  BEE_RETIRE_AT_PCT: z.number().positive().max(100),
+  LIVE_SIZE_MULTIPLIER: z.number().max(1),
+  BREEZY_MIN_OPEN_PROB: z.number().max(1),
+  BIZZY_SIZE_FRACTION: z.number().positive().max(1),
+  TAKER_FEE_RATE: z.number().lt(1),
+  JEV_USD_PER_MTOK: z.number().positive(),
+  BIZZY_UNIVERSE_SIZE: z.number().int().positive(),
+  BOOZY_CANDIDATES: z.number().int().positive(),
+  BIZZY_TIME_STOP_MINUTES: minutes.positive(),
+};
+
 // Per-style knobs: BIZZY_* = Breakout, BREEZY_* = Trend, BOOZY_* = Momentum. Every bee on that style uses them.
 const perStyle = (prefix: string, d: { trades: number; fee: number; spread: number; cooldown: number; stopAtr: number; maxFlat: number }) => ({
-  [`${prefix}_MAX_TRADES_PER_DAY`]: num(d.trades),
+  [`${prefix}_MAX_TRADES_PER_DAY`]: num(d.trades).pipe(z.number().int()),
   [`${prefix}_FEE_BUDGET_USD_DAY`]: num(d.fee),
-  [`${prefix}_SPREAD_GATE_BPS`]: num(d.spread),
-  [`${prefix}_COOLDOWN_MINUTES`]: num(d.cooldown),
-  [`${prefix}_STOP_ATR_MULT`]: num(d.stopAtr),
-  [`${prefix}_MAX_FLAT_MINUTES`]: num(d.maxFlat),
+  [`${prefix}_SPREAD_GATE_BPS`]: num(d.spread).pipe(z.number().max(10_000)),
+  [`${prefix}_COOLDOWN_MINUTES`]: num(d.cooldown).pipe(minutes),
+  [`${prefix}_STOP_ATR_MULT`]: num(d.stopAtr).pipe(z.number().positive()),
+  [`${prefix}_MAX_FLAT_MINUTES`]: num(d.maxFlat).pipe(minutes),
 });
 // Per-bee OKX keys (demo or live only): BEE1_OKX_API_KEY, BEE1_OKX_DEMO_API_KEY, ...
 const perSlot = (prefix: string) => ({
@@ -126,6 +161,13 @@ const EnvSchema = z.object({
   APP_VERSION: str("dev"),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).optional().default("info"),
   ALERT_WEBHOOK_URL: opt,
+}).superRefine((values, ctx) => {
+  for (const [name, limit] of Object.entries(numericLimits)) {
+    const value = (values as Record<string, unknown>)[name];
+    if (value === undefined) continue;
+    const result = limit.safeParse(value);
+    if (!result.success) for (const issue of result.error.issues) ctx.addIssue({ ...issue, path: [name] });
+  }
 });
 
 export interface BeeKnobs {
@@ -201,7 +243,7 @@ export class ConfigError extends Error {}
 export function loadConfig(env: NodeJS.ProcessEnv = process.env, settings: Settings | null = null): Config {
   const parsed = EnvSchema.safeParse(env);
   if (!parsed.success) {
-    const names = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`);
+    const names = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.code === "invalid_enum_value" ? `must be one of ${i.options.join(", ")}` : i.message}`);
     throw new ConfigError(`Invalid settings:\n  ${names.join("\n  ")}`);
   }
   const e = parsed.data as Record<string, unknown> & z.infer<typeof EnvSchema>;
@@ -213,9 +255,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, settings: Setti
   if (mode === "live" && e.LIVE_ACK !== LIVE_ACK_PHRASE) {
     throw new ConfigError(`MODE=live moves real money. Set LIVE_ACK=${LIVE_ACK_PHRASE} to confirm you accept the risk, or go back to DRY_RUN=true.`);
   }
-
-  if (e.MAX_LEVERAGE > 2 || e.MAX_LEVERAGE <= 0) throw new ConfigError("MAX_LEVERAGE must be in (0, 2]. Hard rule 3.");
-  if (e.MAX_FLAT_MINUTES < 0) throw new ConfigError("MAX_FLAT_MINUTES must be >= 0");
 
   const slots = {} as Record<BeeId, SlotProfile>;
   BEES.forEach((id, i) => {
