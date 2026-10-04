@@ -52,4 +52,28 @@ describe("launch engine journeys", () => {
     expect(restarted.raw.prepare("SELECT COUNT(*) AS n FROM fills").get()).toEqual({ n: 1 });
     restarted.close();
   });
+
+  it("deployment upgrade and rollback preserve one exposure without duplicate fills", async () => {
+    const cfg = testConfig({ DRY_RUN: "true" });
+    const market = view([coin("ENA")]);
+    const path = join(mkdtempSync(join(tmpdir(), "beebots-release-")), "bees.sqlite");
+    const engineFor = (db: Db) => new Engine({ cfg, db, feed: { view: () => market, refresh: async () => {}, refreshTickers: async () => {}, lastRefreshAt: NOW } as unknown as MarketFeed, exec: new SimExecutor(() => market, 0), bus: new EventBus(db), alerts: new Alerts(undefined), jev: new Jev({ ...cfg.jev, client: { async systemOne() { throw new Error("unused"); } }, now: () => NOW }), now: () => NOW, ids: ["bee1"] });
+    const db = new Db(path);
+    const engine = engineFor(db);
+    await engine.start();
+    const inst = market.stats.keys().next().value!;
+    await (engine as unknown as EngineOrders).order("bee1", decision(db, { kind: "open" }), inst, "buy", 1, false, "open");
+    engine.stop();
+    db.close();
+
+    for (const release of ["upgrade", "rollback"]) {
+      const restoredDb = new Db(path);
+      const restored = engineFor(restoredDb);
+      await restored.start();
+      expect(restored.bees.bee1.position, release).toMatchObject({ contracts: 1 });
+      expect(restoredDb.raw.prepare("SELECT COUNT(*) AS n FROM fills").get(), release).toEqual({ n: 1 });
+      restored.stop();
+      restoredDb.close();
+    }
+  });
 });
