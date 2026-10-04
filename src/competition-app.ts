@@ -26,6 +26,10 @@ const LIVE_IDS = ["bee1", "bee2"] as const;
 
 const dbPath = (cfg: Config, name: string) => join(dirname(cfg.dbPath), `competition-${name}.sqlite`);
 
+export function aggregateCompetitionHealth(paper: ReturnType<Engine["health"]>, live: ReturnType<Engine["health"]> | null) {
+  return { ...paper, ok: paper.ok && (live?.ok ?? true), reasons: [...paper.reasons, ...(live?.reasons ?? [])], live };
+}
+
 function publicProfile(cfg: Config) {
   return {
     setup: false,
@@ -117,7 +121,7 @@ export async function runCompetitionApp(cfg: Config): Promise<void> {
       health: () => {
         const paperHealth = paper.health();
         const liveHealth = live?.health() ?? null;
-        return { ...paperHealth, ok: paperHealth.ok && (liveHealth?.ok ?? true), reasons: [...paperHealth.reasons, ...(liveHealth?.reasons ?? [])], live: liveHealth };
+        return aggregateCompetitionHealth(paperHealth, liveHealth);
       },
       update: () => updates.status(),
       competition: () => manager!.status(),
