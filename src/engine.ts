@@ -262,7 +262,10 @@ export class Engine {
       this.d.bus.emit("equity", { bees: this.ids.map((id) => this.publicBee(id)) }, now);
       if (this.d.exec.kind === "okx" && now - this.lastReconAt >= RECON_MS) await this.reconcile();
       this.checkJevOutage(now);
-      if (tickersFresh && !safetyFailed) this.lastSafetyAt = now;
+      if (tickersFresh && !safetyFailed) {
+        this.lastSafetyAt = now;
+        if (this.d.cfg.mode === "live") void this.d.alerts.heartbeat(now);
+      }
     } finally {
       this.ticking = false;
     }

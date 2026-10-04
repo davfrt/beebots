@@ -166,6 +166,7 @@ const EnvSchema = z.object({
   APP_VERSION: str("dev"),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).optional().default("info"),
   ALERT_WEBHOOK_URL: opt,
+  DEAD_MAN_URL: opt,
 }).superRefine((values, ctx) => {
   for (const [name, limit] of Object.entries(numericLimits)) {
     const value = (values as Record<string, unknown>)[name];
@@ -249,6 +250,7 @@ export interface Config {
   dbPath: string;
   logLevel: "debug" | "info" | "warn" | "error";
   alertWebhookUrl?: string;
+  deadManUrl?: string;
   competition: { enabled: boolean; portfolioDailyLossPct: number };
 }
 
@@ -352,6 +354,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, settings: Setti
     dbPath: e.DB_PATH.replaceAll("{mode}", mode),
     logLevel: e.LOG_LEVEL,
     alertWebhookUrl: e.ALERT_WEBHOOK_URL,
+    deadManUrl: e.DEAD_MAN_URL,
     competition: { enabled: e.COMPETITION_MODE, portfolioDailyLossPct: e.PORTFOLIO_DAILY_LOSS_PCT },
   };
 }

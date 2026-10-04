@@ -21,4 +21,14 @@ describe("alerts", () => {
     expect(loadConfig(env).alertWebhookUrl).toBeUndefined();
     expect(loadConfig({ ...env, ALERT_WEBHOOK_URL: "https://alerts.test/topic" }).mode).toBe("live");
   });
+
+  it("reports a dead-man heartbeat only to its separate monitor", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response("ok"));
+    vi.stubGlobal("fetch", fetch);
+    const alerts = new Alerts("https://alerts.test/topic", "https://monitor.test/heartbeat");
+
+    await expect(alerts.heartbeat(123)).resolves.toBe(true);
+
+    expect(fetch).toHaveBeenCalledWith("https://monitor.test/heartbeat", expect.objectContaining({ method: "POST" }));
+  });
 });

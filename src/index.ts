@@ -94,7 +94,7 @@ async function main() {
 
   const db = new Db(cfg.dbPath);
   const bus = new EventBus(db);
-  const alerts = new Alerts(cfg.alertWebhookUrl);
+  const alerts = new Alerts(cfg.alertWebhookUrl, cfg.deadManUrl);
   const cli = createOkxCli({ site: cfg.okx.site, timeoutMs: cfg.okx.cliTimeoutMs });
   // Public market data runs in-process on the kit's REST client; the CLI (one child process per call) is kept for
   // the signed per-bee calls only.

@@ -5,7 +5,20 @@ import { redactString, safeError } from "./redact.js";
 export class Alerts {
   private sent = new Map<string, number>();
 
-  constructor(private url: string | undefined) {}
+  constructor(private url: string | undefined, private deadManUrl?: string) {}
+
+  /** A monitor alerts when these successful safety reports stop arriving. */
+  async heartbeat(now = Date.now()): Promise<boolean> {
+    if (!this.deadManUrl) return false;
+    try {
+      const response = await fetch(this.deadManUrl, { method: "POST", body: JSON.stringify({ status: "ok", ts: now }), headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(5000) });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return true;
+    } catch (err) {
+      log.warn("dead-man report failed", { err: safeError(err) });
+      return false;
+    }
+  }
 
   async send(text: string, now = Date.now()): Promise<boolean> {
     const t = redactString(`[beebots] ${text}`);

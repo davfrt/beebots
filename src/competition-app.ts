@@ -46,7 +46,7 @@ export async function runCompetitionApp(cfg: Config): Promise<void> {
   const paperDb = new Db(paperCfg.dbPath);
   const liveDb = liveCfg ? new Db(liveCfg.dbPath) : null;
   const bus = new EventBus(paperDb);
-  const alerts = new Alerts(cfg.alertWebhookUrl);
+  const alerts = new Alerts(cfg.alertWebhookUrl, cfg.deadManUrl);
   const cli = createOkxCli({ site: cfg.okx.site, timeoutMs: cfg.okx.cliTimeoutMs });
   const api = createPublicApi(cfg.okx.apiBase, false, createOkxPublicRest({ apiBase: cfg.okx.apiBase, timeoutMs: cfg.okx.cliTimeoutMs }));
   let live: Engine | undefined;
