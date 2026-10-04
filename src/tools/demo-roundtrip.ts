@@ -66,6 +66,22 @@ for (const bee of BEES) {
     ok(pos?.mgnMode === "isolated", `margin mode ${pos?.mgnMode}`);
     ok(Number(pos?.lever) === 2, `leverage ${pos?.lever}x`);
 
+    const stop = await exec.protect(bee, { instId: inst.instId, closeSide: "sell", contracts: inst.minSz, triggerPx: open.avgPx * 0.99 });
+    if (!stop.ok || !stop.algoId) {
+      ok(false, `native stop failed: ${stop.ok ? "no algo id" : `${stop.error.code} ${stop.error.message}`}`);
+    } else {
+      const placed = { instId: inst.instId, closeSide: "sell" as const, contracts: inst.minSz, triggerPx: stop.triggerPx, algoId: stop.algoId };
+      ok(await exec.protectionMatches(bee, placed), "native reduce-only stop placed and verified");
+      const amended = await exec.protect(bee, { ...placed, triggerPx: open.avgPx * 0.98 });
+      if (!amended.ok || !amended.algoId) {
+        ok(false, `native stop amendment failed: ${amended.ok ? "no algo id" : `${amended.error.code} ${amended.error.message}`}`);
+      } else {
+        const updated = { ...placed, triggerPx: amended.triggerPx, algoId: amended.algoId };
+        ok(await exec.protectionMatches(bee, updated), "native stop amended and verified");
+        ok(await exec.cancelProtection(bee, inst.instId, amended.algoId), "native stop cancelled before reduce-only close");
+      }
+    }
+
     const close = await exec.market(bee, { instId: inst.instId, side: "sell", contracts: inst.minSz, reduceOnly: true, clOrdId: cl(bee, "c") });
     if (!close.ok) {
       ok(false, `CLOSE FAILED ${close.error.code} ${close.error.message} (position left open on demo)`);
@@ -73,7 +89,7 @@ for (const bee of BEES) {
     }
     const realised = (close.avgPx - open.avgPx) * inst.minSz * inst.ctVal;
     ok(true, `closed @ ${close.avgPx} · fee $${close.feeUsd.toFixed(6)} · realised $${realised.toFixed(6)}`);
-    ok(!(await posRow(bee)), "flat again on OKX");
+    ok(!(await posRow(bee)) && !(await exec.pendingOrders(bee))?.length && !(await exec.conditionalOrders(bee))?.length, "flat again on OKX with nothing pending");
 
     // Reconciliation: our fees vs OKX fills, to the cent.
     const ids = new Set([open.ordId, close.ordId].filter((x): x is string => !!x));
