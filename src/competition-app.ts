@@ -114,7 +114,11 @@ export async function runCompetitionApp(cfg: Config): Promise<void> {
       liveDb: liveDb ?? undefined,
       visitors: new Visitors(paperDb),
       snapshot: () => ({ ...paper.snapshot(), live: live?.snapshot() ?? null }),
-      health: () => ({ ...paper.health(), live: live?.health() ?? null }),
+      health: () => {
+        const paperHealth = paper.health();
+        const liveHealth = live?.health() ?? null;
+        return { ...paperHealth, ok: paperHealth.ok && (liveHealth?.ok ?? true), reasons: [...paperHealth.reasons, ...(liveHealth?.reasons ?? [])], live: liveHealth };
+      },
       update: () => updates.status(),
       competition: () => manager!.status(),
     },

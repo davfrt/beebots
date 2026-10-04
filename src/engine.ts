@@ -79,6 +79,7 @@ export class Engine {
   private timers: NodeJS.Timeout[] = [];
   private lastEquityAt = 0;
   private lastReconAt = 0;
+  private lastSafetyAt = 0;
   private lastFundingSlot: number;
   private seq = 0;
   private jevDownAlerted = false;
@@ -146,8 +147,9 @@ export class Engine {
       }
     }
 
+    if (cfg.mode === "live" && (!cfg.alertWebhookUrl || !(await this.d.alerts.send("live engine startup test")))) throw new Error("live alert startup test failed");
     this.d.bus.emit("status", { event: "engine_start", mode: cfg.mode, tickMs: cfg.tickMs });
-    this.d.alerts.send(`engine started (MODE=${cfg.mode})`);
+    void this.d.alerts.send(`engine started (MODE=${cfg.mode})`);
 
     this.loop(() => this.safetyTick(), cfg.safetyTickMs);
     if (this.d.manageFeed !== false) this.loop(() => this.refreshMarket(), cfg.dataRefreshMs);
@@ -215,9 +217,11 @@ export class Engine {
     if (this.stopped || this.ticking) return;
     this.ticking = true;
     try {
+      let tickersFresh = true;
       try {
         await this.d.feed.refreshTickers();
       } catch (err) {
+        tickersFresh = false;
         log.warn("ticker refresh failed", { err: safeError(err) });
       }
       const now = this.now();
@@ -226,7 +230,9 @@ export class Engine {
       if (this.d.exec.kind === "sim") this.simulateFunding(now);
 
       this.updatePortfolioBreaker(now);
+      let safetyFailed = false;
       const safetyResults = await Promise.all(this.ids.map((id) => this.runSafety(id, now).catch((err) => {
+        safetyFailed = true;
         log.error("safety check failed", { bee: id, err: safeError(err) });
         return false;
       })));
@@ -256,6 +262,7 @@ export class Engine {
       this.d.bus.emit("equity", { bees: this.ids.map((id) => this.publicBee(id)) }, now);
       if (this.d.exec.kind === "okx" && now - this.lastReconAt >= RECON_MS) await this.reconcile();
       this.checkJevOutage(now);
+      if (tickersFresh && !safetyFailed) this.lastSafetyAt = now;
     } finally {
       this.ticking = false;
     }
@@ -1291,7 +1298,17 @@ export class Engine {
 
   health() {
     const age = this.now() - this.d.feed.lastRefreshAt;
-    return { ok: this.d.feed.lastRefreshAt > 0 && age < 5 * this.d.cfg.dataRefreshMs, mode: this.d.cfg.mode, closed: this.closedAt !== null, flat: this.ids.every((id) => !this.bees[id].position), marketAgeMs: age, uptimeS: Math.round((this.now() - this.startedAt) / 1000) };
+    const now = this.now();
+    const maxAge = 5 * this.d.cfg.safetyTickMs;
+    const reasons: string[] = [];
+    if (!this.d.feed.lastRefreshAt || age >= 5 * this.d.cfg.dataRefreshMs) reasons.push("market data stale");
+    if (!this.lastSafetyAt || now - this.lastSafetyAt >= maxAge) reasons.push("safety loop stale");
+    if (this.d.exec.kind === "okx") {
+      if (this.recon.ok !== true || now - this.recon.ts >= RECON_MS * 2) reasons.push("exchange reconciliation stale or failed");
+      if (this.ids.some((id) => this.d.db.hasUnresolvedExposureOrder(id))) reasons.push("unresolved exchange order");
+      if (this.ids.some((id) => this.bees[id].position && !this.protectionVerified.has(id))) reasons.push("position lacks verified native protection");
+    }
+    return { ok: reasons.length === 0, reasons, mode: this.d.cfg.mode, closed: this.closedAt !== null, flat: this.ids.every((id) => !this.bees[id].position), marketAgeMs: age, safetyAgeMs: this.lastSafetyAt ? now - this.lastSafetyAt : null, reconciliationAgeMs: this.recon.ts ? now - this.recon.ts : null, uptimeS: Math.round((now - this.startedAt) / 1000) };
   }
 }
 
