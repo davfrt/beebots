@@ -148,6 +148,11 @@ export class Db {
       .run(f.orderId, f.bee, f.ts, f.instId, f.side, f.contracts, f.px, f.notionalUsd, f.feeUsd, f.realisedUsd);
   }
 
+  /** A small write proves the currently-open database is still writable. */
+  healthProbe(ts: number): void {
+    this.setMeta("health_checked_at", String(ts));
+  }
+
   /** Persist the exchange outcome, ledger fill, and resulting bee state together. */
   settleOrder(orderId: number, ordId: string | null, state: "filled" | "partial", f: FillRow, bee: BeeState): boolean {
     this.raw.exec("BEGIN");

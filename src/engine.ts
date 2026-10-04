@@ -80,6 +80,8 @@ export class Engine {
   private lastEquityAt = 0;
   private lastReconAt = 0;
   private lastSafetyAt = 0;
+  private lastExchangeReadAt = 0;
+  private dbWritable = true;
   private lastFundingSlot: number;
   private seq = 0;
   private jevDownAlerted = false;
@@ -147,7 +149,7 @@ export class Engine {
       }
     }
 
-    if (cfg.mode === "live" && (!cfg.alertWebhookUrl || !(await this.d.alerts.send("live engine startup test")))) throw new Error("live alert startup test failed");
+    if (cfg.mode === "live" && (!cfg.alertWebhookUrl || !cfg.deadManUrl || !(await this.d.alerts.send("live engine startup test")))) throw new Error("live alert startup test failed");
     this.d.bus.emit("status", { event: "engine_start", mode: cfg.mode, tickMs: cfg.tickMs });
     void this.d.alerts.send(`engine started (MODE=${cfg.mode})`);
 
@@ -225,6 +227,14 @@ export class Engine {
         log.warn("ticker refresh failed", { err: safeError(err) });
       }
       const now = this.now();
+      try {
+        this.d.db.healthProbe(now);
+        this.dbWritable = true;
+      } catch (err) {
+        this.dbWritable = false;
+        log.error("database health write failed", { err: safeError(err) });
+        return;
+      }
       for (const id of this.ids) this.markBee(id, now);
       if (this.d.feed.lastRefreshAt === 0) return; // no market data yet
       if (this.d.exec.kind === "sim") this.simulateFunding(now);
@@ -1044,6 +1054,7 @@ export class Engine {
     const ok = diffs.length === 0;
     const was = this.recon.ok;
     this.recon = { ok, detail: ok ? "books match OKX" : diffs.join(" | "), ts: now };
+    if (ok) this.lastExchangeReadAt = now;
     this.d.db.setMeta("reconciliation_ready", ok ? "true" : "false");
     this.d.bus.emit("recon", { ok, detail: this.recon.detail }, now);
     if (!ok && was !== false) this.d.alerts.send(`reconciliation mismatch: ${this.recon.detail}`);
@@ -1306,12 +1317,14 @@ export class Engine {
     const reasons: string[] = [];
     if (!this.d.feed.lastRefreshAt || age >= 5 * this.d.cfg.dataRefreshMs) reasons.push("market data stale");
     if (!this.lastSafetyAt || now - this.lastSafetyAt >= maxAge) reasons.push("safety loop stale");
+    if (!this.dbWritable) reasons.push("database write failed");
     if (this.d.exec.kind === "okx") {
       if (this.recon.ok !== true || now - this.recon.ts >= RECON_MS * 2) reasons.push("exchange reconciliation stale or failed");
+      if (!this.lastExchangeReadAt || now - this.lastExchangeReadAt >= RECON_MS * 2) reasons.push("exchange reads stale");
       if (this.ids.some((id) => this.d.db.hasUnresolvedExposureOrder(id))) reasons.push("unresolved exchange order");
       if (this.ids.some((id) => this.bees[id].position && !this.protectionVerified.has(id))) reasons.push("position lacks verified native protection");
     }
-    return { ok: reasons.length === 0, reasons, mode: this.d.cfg.mode, closed: this.closedAt !== null, flat: this.ids.every((id) => !this.bees[id].position), marketAgeMs: age, safetyAgeMs: this.lastSafetyAt ? now - this.lastSafetyAt : null, reconciliationAgeMs: this.recon.ts ? now - this.recon.ts : null, uptimeS: Math.round((now - this.startedAt) / 1000) };
+    return { ok: reasons.length === 0, reasons, mode: this.d.cfg.mode, closed: this.closedAt !== null, flat: this.ids.every((id) => !this.bees[id].position), marketAgeMs: age, safetyAgeMs: this.lastSafetyAt ? now - this.lastSafetyAt : null, reconciliationAgeMs: this.recon.ts ? now - this.recon.ts : null, exchangeReadAgeMs: this.lastExchangeReadAt ? now - this.lastExchangeReadAt : null, uptimeS: Math.round((now - this.startedAt) / 1000) };
   }
 }
 
