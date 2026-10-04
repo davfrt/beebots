@@ -14,6 +14,7 @@ export interface LastDecision {
   latencyMs: number | null;
   status: string;
   ts: number;
+  release?: string;
   /** The rules made the call (one legal move, a hold); Jev was not asked. */
   required?: boolean;
 }
@@ -30,6 +31,7 @@ export interface PublicBee {
     entryPx: number;
     markPx: number | null;
     stopPx: number | null;
+    protected: boolean;
     uplUsd: number;
     minutesHeld: number;
   } | null;
@@ -51,6 +53,7 @@ export interface Snapshot {
   startedAt: number;
   startEquityUsd: number;
   tickMs: number;
+  safetyTickMs?: number;
   bees: PublicBee[];
   leaderboard: Array<{ bee: BeeName; equityUsd: number }>;
   totals: { feesUsd: number; fundingUsd: number; jevUsd: number; pnlUsd: number };
@@ -60,6 +63,51 @@ export interface Snapshot {
   visitors?: { total: number; watching: number };
   /** Set when a newer GitHub Release exists than the version this install runs. */
   update?: { current: string; latest: string } | null;
+  portfolioBreaker?: { dayStartEquityUsd: number; trippedAt: number | null; lossStopPct: number | null };
+  risk?: { takerFeeRate: number };
+  competition?: CompetitionStatus | null;
+  live?: Snapshot | null;
+}
+
+export interface CompetitionStrategy {
+  fingerprint: string;
+  sourceId: string;
+  name: string;
+  tagline: string;
+  style: "bizzy" | "breezy" | "boozy";
+  rules: string;
+  coins: string[];
+  returnPct: number;
+  trades: number;
+  official: boolean;
+  source: "online" | "paper" | "live";
+}
+
+export interface Installation {
+  fingerprint: string;
+  installedAt: number;
+  baselineEquityUsd: number;
+  baselineTotals: PublicBee["totals"];
+  baselineDay: string;
+  baselineTradesToday: number;
+  baselineFeesTodayUsd: number;
+}
+
+export interface CompetitionStatus {
+  observedAt: number | null;
+  observed: number;
+  problem: string | null;
+  nextSelectionAt: number;
+  liveEnabled: boolean;
+  selectedDay: string | null;
+  champion: CompetitionStrategy | null;
+  championSince: number | null;
+  activeSlot: BeeName | null;
+  liveSlots: Partial<Record<BeeName, CompetitionStrategy>>;
+  liveInstalls: Partial<Record<BeeName, Installation>>;
+  paper: Array<{ slot: BeeName; strategy: CompetitionStrategy; startedAt: number; install?: Installation }>;
+  ranking: CompetitionStrategy[];
+  reason: string;
 }
 
 export interface DecisionEvent {

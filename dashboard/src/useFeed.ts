@@ -16,7 +16,10 @@ export interface FeedState {
   snap: Snapshot | null;
   bees: Partial<Record<BeeName, PublicBee>>;
   curves: Partial<Record<BeeName, Curve>>;
+  liveCurves: Partial<Record<BeeName, Curve>>;
   decisions: DecisionEvent[];
+  liveDecisions: DecisionEvent[];
+  liveEvents: AnyEvent[];
   toasts: Toast[];
   flashes: Partial<Record<BeeName, { kind: "fill" | "funding" | "cap"; at: number; text: string }>>;
   connected: boolean;
@@ -26,9 +29,9 @@ export interface FeedState {
 
 type Action =
   | { t: "snap"; snap: Snapshot }
-  | { t: "curves"; curves: Partial<Record<BeeName, Curve>> }
-  | { t: "history"; events: AnyEvent[] }
-  | { t: "event"; ev: AnyEvent }
+  | { t: "curves"; curves: Partial<Record<BeeName, Curve>>; live?: boolean }
+  | { t: "history"; events: AnyEvent[]; live?: boolean }
+  | { t: "event"; ev: AnyEvent; live?: boolean }
   | { t: "connected"; on: boolean }
   | { t: "expire"; now: number };
 
@@ -43,18 +46,29 @@ function appendPoint(curve: Curve | undefined, ts: number, eq: number): Curve {
   return c;
 }
 
+function belongsToCurrentPaper(decision: DecisionEvent, snap: Snapshot | null): boolean {
+  if (!snap?.competition) return true;
+  const row = snap.competition.paper.find((candidate) => candidate.slot === decision.bee);
+  return !!row?.install && decision.ts > row.install.installedAt;
+}
+
+const roster = (snap: Snapshot | null) => snap?.competition?.paper.map((row) => `${row.slot}:${row.install?.fingerprint ?? ""}:${row.install?.installedAt ?? 0}`).join("|") ?? "";
+
 function reduce(s: FeedState, a: Action): FeedState {
   switch (a.t) {
     case "snap": {
       const bees = { ...s.bees };
       for (const b of a.snap.bees) bees[b.bee] = b;
-      return { ...s, snap: a.snap, bees };
+      const liveCurves = { ...s.liveCurves };
+      for (const b of a.snap.live?.bees ?? []) liveCurves[b.bee] = appendPoint(liveCurves[b.bee], a.snap.live!.ts, b.equityUsd);
+      const changed = roster(s.snap) !== roster(a.snap);
+      return { ...s, snap: a.snap, bees, liveCurves, decisions: s.decisions.filter((decision) => belongsToCurrentPaper(decision, a.snap)), decisionTimes: changed ? [] : s.decisionTimes };
     }
     case "curves":
-      return { ...s, curves: { ...a.curves } };
+      return a.live ? { ...s, liveCurves: { ...a.curves } } : { ...s, curves: { ...a.curves } };
     case "history": {
-      const decisions = a.events.filter((e): e is DecisionEvent => e.type === "decision").reverse().slice(0, MAX_DECISIONS);
-      return { ...s, decisions };
+      const decisions = a.events.filter((e): e is DecisionEvent => e.type === "decision" && (a.live || belongsToCurrentPaper(e, s.snap))).reverse().slice(0, MAX_DECISIONS);
+      return a.live ? { ...s, liveDecisions: decisions, liveEvents: [...a.events].reverse().slice(0, MAX_DECISIONS) } : { ...s, decisions };
     }
     case "connected":
       return { ...s, connected: a.on };
@@ -67,9 +81,10 @@ function reduce(s: FeedState, a: Action): FeedState {
       const ev = a.ev;
       const now = Date.now();
       const base = { ...s, lastEventAt: now };
+      if (a.live) return { ...base, liveDecisions: ev.type === "decision" ? [ev, ...s.liveDecisions].slice(0, MAX_DECISIONS) : s.liveDecisions, liveEvents: [ev, ...s.liveEvents].slice(0, MAX_DECISIONS) };
       switch (ev.type) {
         case "decision":
-          return { ...base, decisions: [ev, ...s.decisions].slice(0, MAX_DECISIONS), decisionTimes: [...s.decisionTimes, now] };
+          return belongsToCurrentPaper(ev, s.snap) ? { ...base, decisions: [ev, ...s.decisions].slice(0, MAX_DECISIONS), decisionTimes: [...s.decisionTimes, now] } : base;
         case "equity": {
           const bees = { ...s.bees };
           const curves = { ...s.curves };
@@ -105,7 +120,7 @@ function reduce(s: FeedState, a: Action): FeedState {
   }
 }
 
-const initial: FeedState = { snap: null, bees: {}, curves: {}, decisions: [], toasts: [], flashes: {}, connected: false, lastEventAt: 0, decisionTimes: [] };
+const initial: FeedState = { snap: null, bees: {}, curves: {}, liveCurves: {}, decisions: [], liveDecisions: [], liveEvents: [], toasts: [], flashes: {}, connected: false, lastEventAt: 0, decisionTimes: [] };
 
 async function getJson<T>(path: string): Promise<T> {
   const r = await fetch(path, { cache: "no-store" });
@@ -120,13 +135,34 @@ export function useFeed(soundOn: boolean): FeedState {
 
   useEffect(() => {
     let alive = true;
-    const loadSnap = () => getJson<Snapshot>("/snapshot").then((snap) => alive && dispatch({ t: "snap", snap })).catch(() => {});
-    const loadCurves = () => getJson<Partial<Record<BeeName, Curve>>>("/equity?days=30").then((curves) => alive && dispatch({ t: "curves", curves })).catch(() => {});
+    let latestSnap: Snapshot | null = null;
+    let liveEs: EventSource | null = null;
+    const loadSnap = () => getJson<Snapshot>("/snapshot").then((snap) => {
+      latestSnap = snap;
+      if (alive) dispatch({ t: "snap", snap });
+    }).catch(() => {});
+    const loadCurves = () => {
+      const paperSince = Math.min(...(latestSnap?.competition?.paper.flatMap((row) => row.install ? [row.install.installedAt] : []) ?? []));
+      const liveSince = latestSnap?.competition?.activeSlot ? latestSnap.competition.liveInstalls[latestSnap.competition.activeSlot]?.installedAt : undefined;
+      const paperQuery = Number.isFinite(paperSince) ? `?since=${paperSince}` : "?days=30";
+      void getJson<Partial<Record<BeeName, Curve>>>(`/equity${paperQuery}`).then((curves) => alive && dispatch({ t: "curves", curves })).catch(() => {});
+      if (liveSince) void getJson<Partial<Record<BeeName, Curve>>>(`/equity?book=live&since=${liveSince}`).then((curves) => alive && dispatch({ t: "curves", curves, live: true })).catch(() => {});
+    };
+    const loadLive = () => {
+      if (!latestSnap?.live) return;
+      getJson<AnyEvent[]>("/history?book=live&n=400").then((events) => alive && dispatch({ t: "history", events, live: true })).catch(() => {});
+      if (liveEs) return;
+      liveEs = new EventSource("/events?book=live");
+      liveEs.onmessage = (m) => {
+        try {
+          dispatch({ t: "event", ev: JSON.parse(m.data) as AnyEvent, live: true });
+        } catch {}
+      };
+    };
 
     // Hit counter: one call per page load; the engine dedupes per visitor per day and stores no IPs.
     getJson<{ total: number; watching: number }>("/visit").then(() => loadSnap()).catch(() => {});
-    void loadSnap();
-    void loadCurves();
+    void loadSnap().then(() => { loadCurves(); loadLive(); });
     getJson<AnyEvent[]>("/history?n=400").then((events) => alive && dispatch({ t: "history", events })).catch(() => {});
 
     const es = new EventSource("/events");
@@ -165,6 +201,7 @@ export function useFeed(soundOn: boolean): FeedState {
     return () => {
       alive = false;
       es.close();
+      liveEs?.close();
       clearInterval(snapTimer);
       clearInterval(curveTimer);
       clearInterval(expireTimer);

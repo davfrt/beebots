@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { money, signed } from "./BeeColumn";
 import { HiveButton } from "./Hive";
-import { PROFILE, type Snapshot } from "./types";
+import { PROFILE, type PublicBee, type Snapshot } from "./types";
 
 function Clock() {
   const [now, setNow] = useState(Date.now());
@@ -53,12 +53,17 @@ function Counter({ label, value, sub, tone }: { label: string; value: string; su
   );
 }
 
-export function Header({ snap, connected, stalled, soundOn, onSound }: { snap: Snapshot | null; connected: boolean; stalled: boolean; soundOn: boolean; onSound: () => void }) {
-  const day = snap?.startedAt ? Math.floor((Date.now() - snap.startedAt) / 86_400_000) + 1 : 1;
-  const t = snap?.totals;
-  const jev = snap?.jev;
-  const orders = snap?.bees.reduce((a, b) => a + b.totals.orders, 0) ?? 0;
-  const decisions = snap?.bees.reduce((a, b) => a + b.totals.decisions, 0) ?? 0;
+export function Header({ snap, focus, focusStartedAt, connected, stalled, soundOn, onSound }: { snap: Snapshot | null; focus?: PublicBee; focusStartedAt?: number; connected: boolean; stalled: boolean; soundOn: boolean; onSound: () => void }) {
+  const liveSnap = snap?.live ?? null;
+  const view = liveSnap ?? snap;
+  const startedAt = focusStartedAt ?? view?.startedAt;
+  const day = startedAt ? Math.floor((Date.now() - startedAt) / 86_400_000) + 1 : 1;
+  const waitingForFocus = !!liveSnap && !focus;
+  const t = focus ? { ...focus.totals, pnlUsd: focus.pnlUsd } : waitingForFocus ? undefined : view?.totals;
+  const jev = view?.jev;
+  const orders = focus?.totals.orders ?? (waitingForFocus ? 0 : view?.bees.reduce((a, b) => a + b.totals.orders, 0)) ?? 0;
+  const decisions = focus?.totals.decisions ?? (waitingForFocus ? 0 : view?.bees.reduce((a, b) => a + b.totals.decisions, 0)) ?? 0;
+  const paperCount = snap?.competition?.paper.length ?? 3;
   const live = connected && !stalled;
   return (
     <header className="top">
@@ -68,21 +73,21 @@ export function Header({ snap, connected, stalled, soundOn, onSound }: { snap: S
           <HiveButton />
         </div>
         <div className="brand-sub">
-          <span className={`mode mode-${snap?.mode ?? "dry"}`}>{snap?.mode === "live" ? "● LIVE MONEY" : snap?.mode === "demo" ? "OKX DEMO" : "PAPER TRADING"}{snap?.closed ? (snap.closed.flat ? " · ENDED" : " · CLOSING") : ""}</span>
+          <span className={`mode mode-${view?.mode ?? "dry"}`}>{view?.mode === "live" ? "● LIVE MONEY" : view?.mode === "demo" ? "OKX DEMO" : "PAPER TRADING"}{view?.closed ? (view.closed.flat ? " · ENDED" : " · CLOSING") : ""}</span>
           {snap?.update ? (
             <a className="update-pill" href={`${PROFILE.links?.code ?? "https://github.com/imikerussell/beebots"}/releases/latest`} target="_blank" rel="noopener" title={`You run ${snap.update.current}. See what's new and how to update.`}>
               Update available: {snap.update.latest} ↗
             </a>
           ) : null}
           <span className="dim">
-            day {day} · 3 bees · OKX X-Perps · not financial advice
+            day {day} · {liveSnap ? `1 champion + ${paperCount} paper challenger${paperCount === 1 ? "" : "s"}` : `${paperCount} paper challenger${paperCount === 1 ? "" : "s"}`} · OKX X-Perps · not financial advice
           </span>
         </div>
       </div>
 
       <div className="counters">
-        <Counter label="Total P&L" value={t ? signed(t.pnlUsd) : "–"} tone={t ? (t.pnlUsd >= 0 ? "good" : "bad") : undefined} sub={`${orders} orders`} />
-        <Counter label="Fees paid" value={t ? money(t.feesUsd) : "–"} sub="taker 0.05%" />
+        <Counter label={focus ? "Since installed" : "Total P&L"} value={t ? signed(t.pnlUsd) : "–"} tone={t ? (t.pnlUsd >= 0 ? "good" : "bad") : undefined} sub={`${orders} orders`} />
+        <Counter label="Fees paid" value={t ? money(t.feesUsd) : "–"} sub={snap?.risk ? `taker ${(snap.risk.takerFeeRate * 100).toFixed(2)}%` : undefined} />
         <Counter label="Funding" value={t ? signed(t.fundingUsd) : "–"} sub="00 · 08 · 16 UTC" />
         <Counter
           label="Jev spend"
@@ -102,7 +107,7 @@ export function Header({ snap, connected, stalled, soundOn, onSound }: { snap: S
       </div>
 
       <div className="top-right">
-        <Recon recon={snap?.recon} mode={snap?.mode} />
+        <Recon recon={view?.recon} mode={view?.mode} />
         <div className="conn">
           <span className={`conn-dot ${live ? "on" : "off"}`} />
           <span>{live ? "live" : connected ? "stalled" : "reconnecting"}</span>

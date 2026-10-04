@@ -6,16 +6,18 @@ interface Props {
   color: string;
   baseline: number;
   gradientId: string;
+  moneyAxis?: boolean;
 }
 
 const PAD = { top: 12, right: 72, bottom: 22, left: 4 };
 const usd = (x: number) => `$${x.toFixed(2)}`;
 /** Axis labels are % from the start stake, so every bee reads on the same scale. */
 const pctFrom = (x: number, base: number) => `${x >= base ? "+" : "−"}${Math.abs(((x - base) / base) * 100).toFixed(1)}%`;
+const moneyFrom = (x: number, base: number) => `${x >= base ? "+" : "−"}$${Math.abs(x - base).toFixed(2)}`;
 const time = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
 /** One series per chart (the column header names it), start-equity baseline, crosshair hover. */
-export function EquityChart({ curve, color, baseline, gradientId }: Props) {
+export function EquityChart({ curve, color, baseline, gradientId, moneyAxis = false }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [hover, setHover] = useState<number | null>(null);
@@ -84,7 +86,7 @@ export function EquityChart({ curve, color, baseline, gradientId }: Props) {
             <g key={v}>
               <line x1={PAD.left} x2={PAD.left + g.iw} y1={g.y(v)} y2={g.y(v)} className="gridline" />
               <text x={PAD.left + g.iw + 8} y={g.y(v)} className="axis" dominantBaseline="middle">
-                {pctFrom(v, baseline)}
+                 {moneyAxis ? moneyFrom(v, baseline) : pctFrom(v, baseline)}
               </text>
             </g>
           ))}
@@ -113,7 +115,7 @@ export function EquityChart({ curve, color, baseline, gradientId }: Props) {
       {g && hp && (
         <div className="tooltip" style={{ left: Math.min(g.x(hp[0]) + 12, size.w - 150), top: 8 }}>
           <div className="tt-value">
-            {usd(hp[1])} <span className="dim">{pctFrom(hp[1], baseline)}</span>
+            {usd(hp[1])} <span className="dim">{moneyAxis ? moneyFrom(hp[1], baseline) : pctFrom(hp[1], baseline)}</span>
           </div>
           <div className="tt-sub">{new Date(hp[0]).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</div>
         </div>

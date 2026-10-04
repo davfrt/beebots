@@ -1,5 +1,5 @@
 import { EquityChart } from "./EquityChart";
-import { BEE_META, type BeeName, type PublicBee } from "./types";
+import { BEE_META, type BeeMeta, type BeeName, type PublicBee } from "./types";
 import type { Curve, FeedState } from "./useFeed";
 
 const CAP_LABEL: Record<string, string> = { trade_cap: "BENCHED", fee_budget: "BENCHED", loss_stop: "SENT HOME", retired: "RETIRED" };
@@ -58,16 +58,22 @@ interface Props {
   rank: number;
   gap: number | null;
   flash: FeedState["flashes"][BeeName];
+  identity?: BeeMeta;
+  badge?: string;
+  chartId?: string;
+  variant?: "champion" | "compact";
+  installedAt?: number;
 }
 
-export function BeeColumn({ name, bee, curve, baseline, rank, gap, flash }: Props) {
-  const meta = BEE_META[name];
+export function BeeColumn({ name, bee, curve, baseline, rank, gap, flash, identity, badge, chartId, variant, installedAt }: Props) {
+  const meta = identity ?? BEE_META[name];
   const p = bee?.position ?? null;
   const flashing = flash && Date.now() - flash.at < 2500;
   const cap = bee?.cap ?? null;
+  const compact = variant === "compact";
 
   return (
-    <section className={`bee ${flashing ? `flash-${flash.kind}` : ""}`} style={{ ["--bee" as string]: meta.color, ["--bee-glow" as string]: meta.glow }}>
+    <section className={`bee ${variant ?? ""} ${flashing ? `flash-${flash.kind}` : ""}`} style={{ ["--bee" as string]: meta.color, ["--bee-glow" as string]: meta.glow }}>
       <header className="bee-head">
         <div className="portrait">
           <img src={meta.img} alt={`${meta.title} portrait`} />
@@ -79,21 +85,25 @@ export function BeeColumn({ name, bee, curve, baseline, rank, gap, flash }: Prop
             {meta.coins.length > 0 && <span className="bee-coins"> · {meta.coins.join(" ")}</span>}
             {meta.tagline && <span className="bee-style"> · {meta.styleLabel}</span>}
           </div>
-          {meta.rules && (
+          {meta.rules && !compact && (
             <div className="bee-rules" title={meta.rules}>
               {meta.rules}
             </div>
           )}
         </div>
         <div className="rank">
-          <div className="rank-n">#{rank}</div>
+          <div className="rank-n">{badge ?? `#${rank}`}</div>
           {gap !== null && <div className="rank-gap num">{gap === 0 ? "leading" : `${money(gap)} behind`}</div>}
         </div>
       </header>
 
       <div className="equity">
-        <div className="equity-value num">{bee ? money(bee.equityUsd) : "–"}</div>
-        {bee && <Delta usd={bee.pnlUsd} pct={bee.pnlPct} />}
+        <div className="equity-copy">
+          <span className="eyebrow">{variant === "champion" ? "Your account" : "Paper equity"}</span>
+          <div className="equity-value num">{bee ? money(bee.equityUsd) : "–"}</div>
+        </div>
+        {bee && <Delta usd={bee.pnlUsd} pct={compact ? undefined : bee.pnlPct} />}
+        <span className="since">{installedAt ? `since installed ${new Date(installedAt).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}` : "tracking starts when installed"}</span>
       </div>
 
       {/* In the flow, never over the equity figure. */}
@@ -127,9 +137,9 @@ export function BeeColumn({ name, bee, curve, baseline, rank, gap, flash }: Prop
         )}
       </div>
 
-      <EquityChart curve={curve ?? []} color={meta.color} baseline={baseline} gradientId={`g-${name}`} />
+      {!compact && <EquityChart curve={curve ?? []} color={meta.color} baseline={baseline} gradientId={`g-${chartId ?? name}`} moneyAxis={variant === "champion"} />}
 
-      <div className="last">
+      {!compact && <div className="last">
         <div className="last-head">
           <span className="eyebrow">Jev’s last call</span>
           {bee?.last?.latencyMs != null && <span className="dim num">{bee.last.latencyMs} ms</span>}
@@ -147,14 +157,14 @@ export function BeeColumn({ name, bee, curve, baseline, rank, gap, flash }: Prop
           <div className="dim">waiting…</div>
         )}
         <div className="status">{bee?.last?.status ?? ""}</div>
-      </div>
+      </div>}
 
-      <div className="meters">
+      {!compact && <div className="meters">
         <Meter label="Trades today" value={bee?.tradesToday ?? 0} max={bee?.maxTradesPerDay ?? 1} text={`${bee?.tradesToday ?? 0} / ${bee?.maxTradesPerDay ?? "–"}`} />
         <Meter label="Fee budget" value={bee?.feesTodayUsd ?? 0} max={bee?.feeBudgetUsd ?? 1} text={`${money(bee?.feesTodayUsd ?? 0)} / ${money(bee?.feeBudgetUsd ?? 0)}`} />
-      </div>
+      </div>}
 
-      <div className="costs num">
+      {!compact && <div className="costs num">
         <div>
           <span className="eyebrow">fees</span>
           {money(bee?.totals.feesUsd ?? 0)}
@@ -171,7 +181,7 @@ export function BeeColumn({ name, bee, curve, baseline, rank, gap, flash }: Prop
           <span className="eyebrow">calls</span>
           {(bee?.totals.decisions ?? 0).toLocaleString()}
         </div>
-      </div>
+      </div>}
 
       {flashing && flash.kind === "funding" && <div className="funding-chip num">{flash.text}</div>}
     </section>

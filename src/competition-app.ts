@@ -54,6 +54,7 @@ export async function runCompetitionApp(cfg: Config): Promise<void> {
   const cli = createOkxCli({ site: cfg.okx.site, timeoutMs: cfg.okx.cliTimeoutMs });
   const api = createPublicApi(cfg.okx.apiBase, false, createOkxPublicRest({ apiBase: cfg.okx.apiBase, timeoutMs: cfg.okx.cliTimeoutMs }));
   let live: Engine | undefined;
+  let liveBus: EventBus | undefined;
   const runtime: { paper?: Engine; manager?: CompetitionManager } = {};
   const held = () => [runtime.paper, live].flatMap((e) => e ? e.slotIds().map((id) => e.bees[id]?.position?.instId).filter((x): x is string => !!x) : []);
   const newsCreds = liveEnabled ? LIVE_IDS.map((id) => cfg.creds[id]).find((c) => !!c) : undefined;
@@ -76,7 +77,7 @@ export async function runCompetitionApp(cfg: Config): Promise<void> {
   runtime.paper = paper;
   let liveExec: OkxExecutor | undefined;
   if (liveCfg && liveDb) {
-    const liveBus = new EventBus(liveDb);
+    liveBus = new EventBus(liveDb);
     liveExec = new OkxExecutor(cli, liveCfg.creds, false, (id) => feed.view().instruments.get(id), liveCfg.risk.maxLeverage);
     live = new Engine({
       cfg: liveCfg,
@@ -95,7 +96,10 @@ export async function runCompetitionApp(cfg: Config): Promise<void> {
   }
 
   const competition = new Competition({ db: paperDb, url: cfg.hive.url });
-  const manager = new CompetitionManager({ db: paperDb, competition, paper, live, bus });
+  const manager = new CompetitionManager({
+    db: paperDb, competition, paper, live, bus,
+    promotion: { observeMs: cfg.competition.paperObservationMs, restrictedLiveMs: cfg.competition.restrictedLiveMs, approval: cfg.competition.approval, release: cfg.update.version, identity: cfg.competition.identity },
+  });
   runtime.manager = manager;
   manager.restoreProfiles();
   await paper.start();
@@ -114,6 +118,7 @@ export async function runCompetitionApp(cfg: Config): Promise<void> {
   const server = startServer({
     engine: {
       bus,
+      liveBus,
       db: paperDb,
       liveDb: liveDb ?? undefined,
       visitors: new Visitors(paperDb),

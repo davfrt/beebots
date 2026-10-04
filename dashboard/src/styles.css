@@ -426,6 +426,54 @@ a.counter.host:hover {
   grid-template-columns: repeat(3, 1fr) 1.08fr;
   gap: 1rem;
 }
+.grid.live-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) 0.9fr;
+}
+.command-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 3.4fr) minmax(19rem, 1fr);
+  gap: 1rem;
+}
+.paper-lab {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  overflow: hidden;
+}
+.paper-lab-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0 0.15rem;
+  font-size: 0.72rem;
+}
+.paper-lab-head > div {
+  display: grid;
+  gap: 0.1rem;
+}
+.paper-lab-head strong {
+  font-size: 1.05rem;
+}
+.paper-bees {
+  display: grid;
+  gap: 0.55rem;
+}
+.champion-empty {
+  display: grid;
+  place-content: center;
+  gap: 0.75rem;
+  text-align: center;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+.champion-empty strong {
+  font-size: 2rem;
+}
 
 /* ---------- bee column ---------- */
 .bee {
@@ -439,7 +487,8 @@ a.counter.host:hover {
   border-top: 3px solid var(--bee);
   border-radius: var(--radius);
   padding: 1rem 1.1rem 1rem;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   transition: box-shadow 0.4s;
 }
 .bee.flash-fill {
@@ -447,6 +496,112 @@ a.counter.host:hover {
 }
 .bee.flash-funding {
   box-shadow: 0 0 0 1px var(--bee);
+}
+.bee.champion {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(18rem, 0.8fr);
+  grid-template-areas:
+    "head head"
+    "equity position"
+    "cap cap"
+    "chart last"
+    "chart meters"
+    "chart costs";
+  grid-template-rows: auto auto auto minmax(8rem, 1fr) auto auto;
+  column-gap: 1.4rem;
+  padding: 1.35rem 1.5rem;
+  border-top-width: 4px;
+}
+.champion .bee-head { grid-area: head; }
+.champion .equity { grid-area: equity; }
+.champion .cap-banner { grid-area: cap; }
+.champion .position { grid-area: position; align-self: end; }
+.champion .chart { grid-area: chart; min-height: 18rem; }
+.champion .last { grid-area: last; }
+.champion .meters { grid-area: meters; }
+.champion .costs { grid-area: costs; }
+.champion .portrait {
+  width: 7.5rem;
+  height: 7.5rem;
+}
+.champion .bee-name {
+  font-size: 2.4rem;
+}
+.champion .bee-tag {
+  font-size: 1rem;
+}
+.champion .bee-rules {
+  max-width: 70rem;
+  font-size: 0.82rem;
+}
+.champion .rank-n {
+  color: var(--bee);
+  font-size: 1rem;
+  letter-spacing: 0.12em;
+}
+.champion .equity-value {
+  font-size: 4.4rem;
+}
+.champion .equity .good,
+.champion .equity .bad {
+  font-size: 1.35rem;
+}
+.bee.compact {
+  gap: 0.45rem;
+  padding: 0.7rem 0.75rem;
+  overflow: visible;
+}
+.compact .bee-head {
+  gap: 0.6rem;
+}
+.compact .portrait {
+  width: 3rem;
+  height: 3rem;
+}
+.compact .bee-name {
+  font-size: 1rem;
+}
+.compact .bee-tag,
+.compact .bee-style {
+  font-size: 0.64rem;
+}
+.compact .rank-n {
+  font-size: 1.15rem;
+}
+.compact .rank-gap {
+  display: none;
+}
+.compact .equity {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.1rem 0.6rem;
+}
+.compact .equity-copy {
+  grid-row: 1 / span 2;
+}
+.compact .equity-value {
+  font-size: 1.65rem;
+}
+.compact .equity .good,
+.compact .equity .bad {
+  align-self: end;
+  font-size: 0.8rem;
+}
+.compact .since {
+  font-size: 0.6rem;
+}
+.compact .position {
+  padding: 0.42rem 0.55rem;
+}
+.compact .pos-coin {
+  font-size: 1rem;
+}
+.compact .pos-size {
+  font-size: 0.85rem;
+}
+.compact .pos-upl,
+.compact .pos-px {
+  font-size: 0.65rem;
 }
 .bee-head {
   display: flex;
@@ -490,14 +645,11 @@ a.counter.host:hover {
   color: var(--muted);
   font-size: 0.75rem;
 }
-/* An owner's bee: its rules, one line, full text on hover */
 .bee-rules {
   font-size: 0.72rem;
   color: var(--muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 17rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
   margin-top: 0.1rem;
 }
 .rank {
@@ -837,6 +989,93 @@ a.counter.host:hover {
   text-align: right;
   font-weight: 700;
 }
+.equity-copy {
+  display: grid;
+  gap: 0.18rem;
+}
+.since {
+  color: var(--muted);
+  font-size: 0.72rem;
+  align-self: end;
+}
+
+.competition-card {
+  border-color: color-mix(in srgb, var(--bizzy) 45%, var(--line));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--bizzy) 9%, var(--card)), var(--card) 58%);
+}
+.competition-champion {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.competition-champion > img {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.competition-champion > div {
+  display: grid;
+  gap: 0.12rem;
+}
+.competition-champion strong {
+  font-size: 1.12rem;
+}
+.competition-crown {
+  color: var(--bizzy);
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.competition-strategy {
+  margin: 0.65rem 0 0;
+  color: var(--text-2);
+  font-size: 0.72rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.competition-runners {
+  display: grid;
+  gap: 0.25rem;
+  margin-top: 0.65rem;
+}
+.competition-runners > div {
+  display: grid;
+  grid-template-columns: 1rem 1fr auto;
+  gap: 0.45rem;
+  font-size: 0.78rem;
+}
+.competition-runners .num {
+  color: var(--bizzy);
+  font-weight: 800;
+}
+.competition-note,
+.competition-problem,
+.competition-empty {
+  margin: 0.65rem 0 0;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  color: var(--muted);
+}
+.competition-result {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+.competition-live {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.7rem;
+  margin-top: 0.55rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.7rem;
+}
+.competition-problem {
+  color: var(--critical-text);
+}
 
 .ticker {
   flex: 1;
@@ -1132,6 +1371,32 @@ a.counter.host:hover {
     flex-direction: column;
     gap: 0.75rem;
   }
+  .command-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  .bee.champion {
+    display: flex;
+    min-height: 44rem;
+    padding: 1rem;
+  }
+  .champion .portrait {
+    width: 5.2rem;
+    height: 5.2rem;
+  }
+  .champion .bee-name {
+    font-size: 1.6rem;
+  }
+  .champion .equity-value {
+    font-size: 3rem;
+  }
+  .paper-lab {
+    overflow: visible;
+  }
+  .paper-lab .ticker {
+    min-height: 24rem;
+  }
   .rail {
     display: contents;
   }
@@ -1178,6 +1443,9 @@ a.counter.host:hover {
   }
   .grid {
     display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .grid.live-grid {
     grid-template-columns: 1fr 1fr;
   }
   .rail-card.board,

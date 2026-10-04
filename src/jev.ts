@@ -51,6 +51,8 @@ export interface JevOpts {
   timeoutMs: number;
   dailyUsdCap: number;
   usdPerMTok: number;
+  /** Worst-case one decision charge reserved before the request starts. */
+  decisionReserveUsd?: number;
   /** Spend already recorded today (restored from the DB on restart). */
   spentTodayUsd?: number;
   client?: SystemOne;
@@ -64,6 +66,7 @@ export class Jev {
   private now: () => number;
   private day: string;
   spentTodayUsd: number;
+  private reservedTodayUsd = 0;
   private backoffUntil = 0;
   private backoffStep = 0;
   /** First failure of the current outage, for the "Jev down > 5 min" alert. */
@@ -94,6 +97,7 @@ export class Jev {
     if (d !== this.day) {
       this.day = d;
       this.spentTodayUsd = 0;
+      this.reservedTodayUsd = 0;
     }
   }
 
@@ -102,8 +106,17 @@ export class Jev {
     if (this.capTripped) return { ok: false, reason: "daily_cap", latencyMs: 0 };
     if (t0 < this.backoffUntil) return { ok: false, reason: "backoff", latencyMs: 0 };
 
+    const reserved = this.opts.decisionReserveUsd ?? this.opts.dailyUsdCap;
+    const reservationDay = this.day;
+    // No await occurs between this check and reservation: paper and live share one Jev instance.
+    if (this.spentTodayUsd + this.reservedTodayUsd + reserved > this.opts.dailyUsdCap) return { ok: false, reason: "daily_cap", latencyMs: 0 };
+    this.reservedTodayUsd += reserved;
+
     const labels = Object.keys(ask.menu);
-    if (labels.length === 0) return { ok: false, reason: "error", error: { code: "EMPTY_MENU", message: "no valid options" }, latencyMs: 0 };
+    if (labels.length === 0) {
+      this.reservedTodayUsd -= reserved;
+      return { ok: false, reason: "error", error: { code: "EMPTY_MENU", message: "no valid options" }, latencyMs: 0 };
+    }
     const criteria = Object.fromEntries(labels.map((l) => [l, ask.menu[l]!.desc]));
     const conv = ask.convictionLabels as unknown as readonly [string, string, ...string[]];
 
@@ -124,13 +137,22 @@ export class Jev {
       const c = r.answers.conviction as SDK.ScoreResponse;
       const inputTokens = r.usage?.input_tokens ?? 0;
       const costUsd = (inputTokens * this.opts.usdPerMTok) / 1e6;
+      this.rollDay();
+      const sameDay = this.day === reservationDay;
+      if (sameDay) {
+        this.reservedTodayUsd -= reserved;
+        this.spentTodayUsd += costUsd;
+      }
       const valid = Number.isFinite(a.confidence) && a.confidence >= 0 && a.confidence <= 1
         && Object.values(a.probabilities).every((p) => Number.isFinite(p) && p >= 0 && p <= 1)
         && Number.isFinite(c.score) && c.score >= 0 && c.score <= conv.length - 1
         && Number.isSafeInteger(inputTokens) && inputTokens >= 0 && Number.isFinite(costUsd) && costUsd >= 0;
       if (!valid) return { ok: false, reason: "error", error: { code: "INVALID_NUMERICS", message: "invalid Jev response numerics" }, latencyMs };
-      this.rollDay();
-      this.spentTodayUsd += costUsd;
+      if (sameDay && costUsd > reserved) {
+        // The remote response exceeded the declared bound: lock the budget rather than issuing another call.
+        this.spentTodayUsd = this.opts.dailyUsdCap;
+        return { ok: false, reason: "daily_cap", latencyMs };
+      }
       this.backoffStep = 0;
       this.downSince = null;
       if (!labels.includes(a.choice)) {
@@ -149,6 +171,8 @@ export class Jev {
         model: r.model,
       };
     } catch (err) {
+      this.rollDay();
+      if (this.day === reservationDay) this.reservedTodayUsd -= reserved;
       const latencyMs = this.now() - t0;
       const status = (err as { status?: number }).status;
       if (status === 429 || status === 529 || (status !== undefined && status >= 500)) {

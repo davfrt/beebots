@@ -39,14 +39,20 @@ describe("Jev client", () => {
     expect(req.questions.conviction.criteria).toEqual(["tipsy", "buzzed", "wasted", "legendary"]);
   });
 
-  it("trips the daily cap and stops calling", async () => {
+  it("reserves the daily cap across concurrent callers", async () => {
     const f = fake(answers, 1_000_000); // $0.042 per call
-    const j = new Jev({ ...base, dailyUsdCap: 0.05, client: f });
-    expect((await j.decide(ask)).ok).toBe(true);
-    expect((await j.decide(ask)).ok).toBe(true);
-    const third = await j.decide(ask);
-    expect(third).toMatchObject({ ok: false, reason: "daily_cap" });
-    expect(f.calls.length).toBe(2);
+    const j = new Jev({ ...base, dailyUsdCap: 0.05, decisionReserveUsd: 0.042, client: f });
+    const [first, second] = await Promise.all([j.decide(ask), j.decide(ask)]);
+    expect([first, second].filter((r) => r.ok)).toHaveLength(1);
+    expect(f.calls.length).toBe(1);
+  });
+
+  it("locks the budget if a response exceeds its declared reservation", async () => {
+    const f = fake(answers, 2_000_000);
+    const j = new Jev({ ...base, dailyUsdCap: 0.1, decisionReserveUsd: 0.05, client: f });
+    await expect(j.decide(ask)).resolves.toMatchObject({ ok: false, reason: "daily_cap" });
+    await expect(j.decide(ask)).resolves.toMatchObject({ ok: false, reason: "daily_cap" });
+    expect(f.calls).toHaveLength(1);
   });
 
   it("the cap resets at 00:00 UTC", async () => {
@@ -76,11 +82,11 @@ describe("Jev client", () => {
     expect(await new Jev({ ...base, client: fake(bad) }).decide(ask)).toMatchObject({ ok: false, error: { code: "OFF_MENU" } });
   });
 
-  it("rejects malformed response numerics without charging the daily budget", async () => {
+  it("rejects malformed response numerics while accounting for the call", async () => {
     const bad = { ...answers, action: { ...answers.action, probabilities: { APE_PENGU: 0.62, APE_BTC: Number.NaN } } };
     const j = new Jev({ ...base, client: fake(bad) });
     await expect(j.decide(ask)).resolves.toMatchObject({ ok: false, error: { code: "INVALID_NUMERICS" } });
-    expect(j.spentTodayUsd).toBe(0);
+    expect(j.spentTodayUsd).toBeCloseTo(0.000021, 12);
   });
 
   it("never calls with an empty menu", async () => {

@@ -72,9 +72,12 @@ const numericLimits: Record<string, z.ZodNumber> = {
   BIZZY_SIZE_FRACTION: z.number().positive().max(1),
   TAKER_FEE_RATE: z.number().lt(1),
   JEV_USD_PER_MTOK: z.number().positive(),
+  JEV_DECISION_RESERVE_USD: z.number().positive(),
   BIZZY_UNIVERSE_SIZE: z.number().int().positive(),
   BOOZY_CANDIDATES: z.number().int().positive(),
   BIZZY_TIME_STOP_MINUTES: minutes.positive(),
+  COMPETITION_PAPER_OBSERVATION_HOURS: z.number().positive().max(24 * 365),
+  COMPETITION_RESTRICTED_LIVE_HOURS: z.number().nonnegative().max(24 * 365),
 };
 
 // Per-style knobs: BIZZY_* = Breakout, BREEZY_* = Trend, BOOZY_* = Momentum. Every bee on that style uses them.
@@ -101,12 +104,20 @@ const EnvSchema = z.object({
   DRY_RUN: bool(true),
   MODE: z.enum(["dry", "demo", "live"]).optional().default("dry"),
   COMPETITION_MODE: bool(false),
+  // A candidate needs this local paper record before an owner may approve its promotion.
+  COMPETITION_PAPER_OBSERVATION_HOURS: num(24),
+  COMPETITION_RESTRICTED_LIVE_HOURS: num(24),
+  // Copy the exact execution fingerprint and APP_VERSION from /snapshot to approve one candidate.
+  COMPETITION_APPROVAL_FINGERPRINT: opt,
+  COMPETITION_APPROVAL_RELEASE: opt,
 
   TYPESAFE_API_KEY: opt,
   JEV_MODEL: str("jev-1.13.0"),
   JEV_TIMEOUT_MS: num(2000),
   JEV_DAILY_USD_CAP: num(2),
   JEV_USD_PER_MTOK: num(0.042),
+  // The bounded maximum charged to one Jev decision; it is reserved before paper or live asks Jev.
+  JEV_DECISION_RESERVE_USD: num(0.05),
   TICK_MS: num(60_000),
   SAFETY_TICK_MS: num(10_000),
   DATA_REFRESH_MS: num(60_000),
@@ -184,6 +195,12 @@ const EnvSchema = z.object({
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: [name], message: "must not exceed the configured daily-loss amount" });
     }
   }
+  if (!!values.COMPETITION_APPROVAL_FINGERPRINT !== !!values.COMPETITION_APPROVAL_RELEASE) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["COMPETITION_APPROVAL_FINGERPRINT"], message: "and COMPETITION_APPROVAL_RELEASE must be set together" });
+  }
+  if (values.JEV_DAILY_USD_CAP > 0 && values.JEV_DECISION_RESERVE_USD > values.JEV_DAILY_USD_CAP) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["JEV_DECISION_RESERVE_USD"], message: "must not exceed JEV_DAILY_USD_CAP" });
+  }
 });
 
 export interface BeeKnobs {
@@ -225,7 +242,7 @@ export interface Config {
   update: { enabled: boolean; repo: string; version: string };
   backup: { statusPath?: string; maxAgeMs: number };
   settingsPath: string;
-  jev: { apiKey: string; model: string; timeoutMs: number; dailyUsdCap: number; usdPerMTok: number };
+  jev: { apiKey: string; model: string; timeoutMs: number; dailyUsdCap: number; usdPerMTok: number; decisionReserveUsd: number };
   tickMs: number;
   safetyTickMs: number;
   dataRefreshMs: number;
@@ -255,7 +272,15 @@ export interface Config {
   logLevel: "debug" | "info" | "warn" | "error";
   alertWebhookUrl?: string;
   deadManUrl?: string;
-  competition: { enabled: boolean; portfolioDailyLossPct: number };
+  competition: {
+    enabled: boolean;
+    portfolioDailyLossPct: number;
+    paperObservationMs: number;
+    restrictedLiveMs: number;
+    approval?: { fingerprint: string; release: string };
+    /** Behavior-changing inputs bound into a candidate's execution identity. */
+    identity: unknown;
+  };
 }
 
 export class ConfigError extends Error {}
@@ -332,6 +357,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, settings: Setti
       timeoutMs: e.JEV_TIMEOUT_MS,
       dailyUsdCap: e.JEV_DAILY_USD_CAP,
       usdPerMTok: e.JEV_USD_PER_MTOK,
+      decisionReserveUsd: e.JEV_DECISION_RESERVE_USD,
     },
     tickMs: Math.max(1000, e.TICK_MS),
     safetyTickMs: Math.max(1000, e.SAFETY_TICK_MS),
@@ -360,6 +386,27 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, settings: Setti
     logLevel: e.LOG_LEVEL,
     alertWebhookUrl: e.ALERT_WEBHOOK_URL,
     deadManUrl: e.DEAD_MAN_URL,
-    competition: { enabled: e.COMPETITION_MODE, portfolioDailyLossPct: e.PORTFOLIO_DAILY_LOSS_PCT },
+    competition: {
+      enabled: e.COMPETITION_MODE,
+      portfolioDailyLossPct: e.PORTFOLIO_DAILY_LOSS_PCT,
+      paperObservationMs: e.COMPETITION_PAPER_OBSERVATION_HOURS * 3_600_000,
+      restrictedLiveMs: e.COMPETITION_RESTRICTED_LIVE_HOURS * 3_600_000,
+      approval: e.COMPETITION_APPROVAL_FINGERPRINT ? { fingerprint: e.COMPETITION_APPROVAL_FINGERPRINT, release: e.COMPETITION_APPROVAL_RELEASE! } : undefined,
+      identity: {
+        release: e.APP_VERSION,
+        risk: {
+          maxLeverage: e.MAX_LEVERAGE, maxInitialStopLossUsd: e.MAX_INITIAL_STOP_LOSS_USD,
+          maxNotionalUsdPerBee: e.MAX_NOTIONAL_USD_PER_BEE, dailyLossStopPct: e.DAILY_LOSS_STOP_PCT,
+          portfolioDailyLossPct: e.PORTFOLIO_DAILY_LOSS_PCT, liveSizeMultiplier: e.LIVE_SIZE_MULTIPLIER,
+          liveRampHours: e.LIVE_RAMP_HOURS, takerFeeRate: e.TAKER_FEE_RATE,
+        },
+        styles: {
+          bizzy: knobs("bizzy"), breezy: knobs("breezy"), boozy: knobs("boozy"),
+          breezyMinOpenProb: e.BREEZY_MIN_OPEN_PROB, breezyMinSizeUsd: e.BREEZY_MIN_SIZE_USD,
+          bizzySizeFraction: e.BIZZY_SIZE_FRACTION, bizzyUniverseSize: e.BIZZY_UNIVERSE_SIZE, bizzyTimeStopMinutes: e.BIZZY_TIME_STOP_MINUTES,
+          boozyCandidates: e.BOOZY_CANDIDATES,
+        },
+      },
+    },
   };
 }

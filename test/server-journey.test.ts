@@ -42,4 +42,31 @@ describe("public server journey", () => {
     expect(new TextDecoder().decode(value)).not.toContain("secret");
     await reader.cancel();
   });
+
+  it("keeps live history and events separate from paper", async () => {
+    const db = new Db(":memory:");
+    const liveDb = new Db(":memory:");
+    const bus = new EventBus(db);
+    const liveBus = new EventBus(liveDb);
+    bus.emit("status", { book: "paper" });
+    liveBus.emit("status", { book: "live" });
+    const server = startServer({
+      engine: { bus, liveBus, db, liveDb, visitors: new Visitors(db), snapshot: () => ({}), health: () => ({ ok: true }) },
+      profile: () => ({ bees: [] }), beeImage: () => null,
+    }, 0, "127.0.0.1");
+    await new Promise<void>((resolve) => server.once("listening", resolve));
+    close = () => server.close();
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+    expect(await (await fetch(`${base}/history?book=live`)).json()).toMatchObject([{ book: "live" }]);
+    expect(await (await fetch(`${base}/history`)).json()).toMatchObject([{ book: "paper" }]);
+
+    const events = await fetch(`${base}/events?book=live`);
+    const reader = events.body!.getReader();
+    await reader.read();
+    liveBus.emit("status", { book: "live-stream" });
+    const { value } = await reader.read();
+    expect(new TextDecoder().decode(value)).toContain('"book":"live-stream"');
+    await reader.cancel();
+  });
 });

@@ -16,6 +16,8 @@ export interface ServerDeps {
   /** Absent in setup mode (nothing is trading yet). */
   engine?: {
     bus: EventBus;
+    /** Separate live stream in competition mode. */
+    liveBus?: EventBus;
     db: Db;
     /** Separate live ledger in competition mode. */
     liveDb?: Db;
@@ -53,7 +55,7 @@ function json(res: ServerResponse, status: number, body: unknown) {
 export function startServer(deps: ServerDeps, port: number, bind: string): Server {
   const streams = new Map<string, number>();
   let streamsTotal = 0;
-  const historyCache = new Map<number, { at: number; body: string }>();
+  const historyCache = new Map<string, { at: number; body: string }>();
   const portraitCache = new Map<string, { expires: number; bytes: Promise<Buffer> }>();
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -133,19 +135,25 @@ export function startServer(deps: ServerDeps, port: number, bind: string): Serve
         return json(res, 200, db.equitySeries(since, 720));
       }
       case "/history": {
+        const live = url.searchParams.get("book") === "live";
+        const db = live ? e.liveDb : e.db;
+        if (!db) return json(res, 404, { error: "history book not found" });
         const n = Math.max(1, Math.min(MAX_HISTORY, Number(url.searchParams.get("n") ?? MAX_HISTORY) || MAX_HISTORY));
+        const cacheKey = `${live ? "live" : "paper"}:${n}`;
         const now = Date.now();
-        let hit = historyCache.get(n);
+        let hit = historyCache.get(cacheKey);
         if (!hit || now - hit.at > HISTORY_CACHE_MS) {
           if (historyCache.size > 50) historyCache.clear();
-          hit = { at: now, body: `[${e.db.recentEvents(n).join(",")}]` };
-          historyCache.set(n, hit);
+          hit = { at: now, body: `[${db.recentEvents(n).join(",")}]` };
+          historyCache.set(cacheKey, hit);
         }
         const body = hit.body;
         res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store", "access-control-allow-origin": "*" });
         return res.end(body);
       }
       case "/events": {
+        const bus = url.searchParams.get("book") === "live" ? e.liveBus : e.bus;
+        if (!bus) return json(res, 404, { error: "event book not found" });
         const addr = clientAddr(req.headers["x-forwarded-for"], req.socket.remoteAddress);
         const mine = streams.get(addr) ?? 0;
         if (streamsTotal >= MAX_STREAMS || mine >= MAX_STREAMS_PER_ADDR) return json(res, 503, { error: "too many live connections" });
@@ -168,7 +176,7 @@ export function startServer(deps: ServerDeps, port: number, bind: string): Serve
           "access-control-allow-origin": "*",
         });
         res.write("retry: 2000\n\n");
-        const unsub = e.bus.subscribe((line) => {
+        const unsub = bus.subscribe((line) => {
           // Drop slow clients instead of buffering without bound.
           if (res.writableLength > MAX_BUFFERED) {
             unsub();

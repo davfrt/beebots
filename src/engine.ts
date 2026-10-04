@@ -1270,6 +1270,7 @@ export class Engine {
             entryPx: p.entryPx,
             markPx: mid ?? null,
             stopPx: p.stopPx,
+            protected: this.d.exec.kind !== "okx" || this.protectionVerified.has(id),
             uplUsd: r2(b.uplUsd),
             minutesHeld: Math.round(minutesSince(p.openedAt, this.now())),
           }
@@ -1292,6 +1293,7 @@ export class Engine {
     const view = this.d.feed.view();
     return {
       ts: this.now(),
+      release: this.d.cfg.update.version,
       mode: this.d.cfg.mode,
       startedAt: this.experimentStartedAt,
       closed: this.closedAt === null ? null : { at: this.closedAt, flat: this.ids.every((id) => !this.bees[id].position) },
@@ -1304,6 +1306,7 @@ export class Engine {
       jev: { spentTodayUsd: Number(this.d.jev.spentTodayUsd.toFixed(4)), dailyCapUsd: this.d.cfg.jev.dailyUsdCap, capTripped: this.d.jev.capTripped, down: this.d.jev.downSince !== null },
       recon: this.recon,
       portfolioBreaker: { dayStartEquityUsd: this.portfolioDayStartUsd, trippedAt: this.portfolioTrippedAt, lossStopPct: this.d.portfolioLossStopPct ?? null },
+      risk: { takerFeeRate: this.d.cfg.risk.takerFeeRate },
       market: {
         refreshedAt: view.ts,
         universe: view.gated.map((i) => i.split("-")[0]),
