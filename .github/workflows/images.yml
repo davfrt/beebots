@@ -22,10 +22,28 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck && pnpm lint && pnpm test
+      - run: echo "source_revision=$GITHUB_SHA"
+      - run: pnpm typecheck && pnpm lint && pnpm test && pnpm test:launch
+
+  smoke:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "source_revision=$GITHUB_SHA"
+      - run: docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+      - run: curl --fail --retry 20 --retry-connrefused http://127.0.0.1/health
+      - run: test "$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST http://127.0.0.1/snapshot)" = 405
+      - run: docker compose exec -T engine id -u | grep -x 1000
+      - run: docker compose exec -T web id -u | grep -x 1000
+      - run: docker compose exec -T backup id -u | grep -x 1000
+      - if: always()
+        run: docker compose logs --no-color
+      - if: always()
+        run: docker compose down --volumes
 
   build:
-    needs: test
+    needs: smoke
     runs-on: ubuntu-latest
     strategy:
       matrix:

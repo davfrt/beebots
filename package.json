@@ -23,6 +23,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:launch": "vitest run test/phase1.test.ts test/reconciliation-readiness.test.ts test/execution-bounds.test.ts test/exposure-protection.test.ts test/live-safety.test.ts test/setup.test.ts test/hive.test.ts test/competition.test.ts",
     "universe": "tsx src/tools/universe.ts",
     "snapshot": "tsx src/tools/snapshot.ts",
     "parity": "tsx src/tools/parity-market.ts",
