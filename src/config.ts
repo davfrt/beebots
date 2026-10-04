@@ -164,6 +164,9 @@ const EnvSchema = z.object({
   UPDATE_CHECK: bool(true),
   UPDATE_REPO: str("imikerussell/beebots"),
   APP_VERSION: str("dev"),
+  // Production Compose mounts this read-only from the backup sidecar's separate status volume.
+  BACKUP_STATUS_PATH: opt,
+  BACKUP_MAX_AGE_HOURS: num(26),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).optional().default("info"),
   ALERT_WEBHOOK_URL: opt,
   DEAD_MAN_URL: opt,
@@ -220,6 +223,7 @@ export interface Config {
   links: { sponsor: string; code: string };
   hive: { url: string };
   update: { enabled: boolean; repo: string; version: string };
+  backup: { statusPath?: string; maxAgeMs: number };
   settingsPath: string;
   jev: { apiKey: string; model: string; timeoutMs: number; dailyUsdCap: number; usdPerMTok: number };
   tickMs: number;
@@ -320,6 +324,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, settings: Setti
     links: { sponsor: e.HOST_LINK, code: e.REPO_LINK },
     hive: { url: e.HIVE_URL.replace(/\/+$/, "") },
     update: { enabled: e.UPDATE_CHECK, repo: e.UPDATE_REPO, version: e.APP_VERSION },
+    backup: { statusPath: e.BACKUP_STATUS_PATH, maxAgeMs: e.BACKUP_MAX_AGE_HOURS * 60 * 60_000 },
     settingsPath: e.SETTINGS_PATH,
     jev: {
       apiKey: jevKey!,

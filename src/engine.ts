@@ -1,4 +1,5 @@
 import { customBrain } from "./bees/custom.js";
+import { backupHealth } from "./backup.js";
 import { BRAINS } from "./bees/index.js";
 import { maxNotionalUsd, minutesSince, positionNotional, profitLockStop } from "./bees/common.js";
 import { coinOf, type Action, type BeeBrain, type BeeContext, type BeeState, type Position, type Side } from "./bees/types.js";
@@ -102,6 +103,7 @@ export class Engine {
   private portfolioDayStartUsd = 0;
   private portfolioTrippedAt: number | null = null;
   private protectionVerified = new Set<BeeId>();
+  private lastBackupIssue: string | null | undefined;
 
   constructor(private d: EngineDeps) {
     this.now = d.now ?? Date.now;
@@ -235,6 +237,7 @@ export class Engine {
         log.error("database health write failed", { err: safeError(err) });
         return;
       }
+      this.monitorBackup(now);
       for (const id of this.ids) this.markBee(id, now);
       if (this.d.feed.lastRefreshAt === 0) return; // no market data yet
       if (this.d.exec.kind === "sim") this.simulateFunding(now);
@@ -1318,6 +1321,10 @@ export class Engine {
     if (!this.d.feed.lastRefreshAt || age >= 5 * this.d.cfg.dataRefreshMs) reasons.push("market data stale");
     if (!this.lastSafetyAt || now - this.lastSafetyAt >= maxAge) reasons.push("safety loop stale");
     if (!this.dbWritable) reasons.push("database write failed");
+    if (this.d.cfg.backup.statusPath) {
+      const issue = backupHealth(this.d.cfg.backup.statusPath, now, this.d.cfg.backup.maxAgeMs);
+      if (issue) reasons.push(issue);
+    }
     if (this.d.exec.kind === "okx") {
       if (this.recon.ok !== true || now - this.recon.ts >= RECON_MS * 2) reasons.push("exchange reconciliation stale or failed");
       if (!this.lastExchangeReadAt || now - this.lastExchangeReadAt >= RECON_MS * 2) reasons.push("exchange reads stale");
@@ -1325,6 +1332,14 @@ export class Engine {
       if (this.ids.some((id) => this.bees[id].position && !this.protectionVerified.has(id))) reasons.push("position lacks verified native protection");
     }
     return { ok: reasons.length === 0, reasons, release: this.d.cfg.update.version, mode: this.d.cfg.mode, closed: this.closedAt !== null, flat: this.ids.every((id) => !this.bees[id].position), marketAgeMs: age, safetyAgeMs: this.lastSafetyAt ? now - this.lastSafetyAt : null, reconciliationAgeMs: this.recon.ts ? now - this.recon.ts : null, exchangeReadAgeMs: this.lastExchangeReadAt ? now - this.lastExchangeReadAt : null, uptimeS: Math.round((now - this.startedAt) / 1000) };
+  }
+
+  private monitorBackup(now: number): void {
+    const path = this.d.cfg.backup.statusPath;
+    if (!path) return;
+    const issue = backupHealth(path, now, this.d.cfg.backup.maxAgeMs);
+    if (issue && issue !== this.lastBackupIssue) void this.d.alerts.send(issue, now);
+    this.lastBackupIssue = issue;
   }
 }
 

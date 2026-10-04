@@ -1,3 +1,6 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { Alerts } from "../src/alerts.js";
 import { aggregateCompetitionHealth } from "../src/competition-app.js";
@@ -32,5 +35,17 @@ describe("live safety health", () => {
     const paper = { ok: true, reasons: [], release: "test", mode: "dry" as const, closed: false, flat: true, marketAgeMs: 0, safetyAgeMs: 0, reconciliationAgeMs: null, exchangeReadAgeMs: null, uptimeS: 1 };
     const live = { ...paper, ok: false, reasons: ["exchange reads stale"], mode: "live" as const };
     expect(aggregateCompetitionHealth(paper, live)).toMatchObject({ ok: false, reasons: ["exchange reads stale"], live });
+  });
+
+  it("reports a failed backup as unsafe", async () => {
+    const market = view([coin("ENA")]);
+    const status = join(mkdtempSync(join(tmpdir(), "beebots-backup-")), "status.json");
+    writeFileSync(status, JSON.stringify({ ok: false, completedAt: NOW, error: "upload failed" }));
+    const cfg = testConfig({ DRY_RUN: "true", BACKUP_STATUS_PATH: status });
+    const db = new Db(":memory:");
+    const engine = new Engine({ cfg, db, feed: { view: () => market, refresh: async () => {}, refreshTickers: async () => {}, lastRefreshAt: NOW } as unknown as MarketFeed, exec: new SimExecutor(() => market, 0), bus: new EventBus(db), alerts: new Alerts(undefined), jev: new Jev({ ...cfg.jev, client: { async systemOne() { throw new Error("unused"); } }, now: () => NOW }), now: () => NOW });
+    await engine.start();
+    expect(engine.health()).toMatchObject({ ok: false, reasons: expect.arrayContaining(["backup failed: upload failed"]) });
+    engine.stop();
   });
 });

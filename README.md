@@ -181,8 +181,9 @@ back. If you forget it, run Setup again as above. Installs from before the owner
 **Something wrong?** The engine's log says what it's doing: `docker compose logs engine`, or Hostinger Docker
 Manager → the `engine` container's logs.
 
-**Backups:** a sidecar writes a nightly copy of each database to `/data/backups` inside the `bees-data` volume and
-keeps 7 days. That copy lives on the same server, so take an off-server copy yourself if you care about the history.
+**Backups:** production encrypts the complete recovery set and atomically uploads it to an off-host SSH destination.
+Set the backup recipient, SSH destination, key, and known-hosts files described in [`deploy/RELEASE.md`](deploy/RELEASE.md)
+before deploying. A failed or stale backup makes `/health` non-green.
 
 ## Real money (read this twice)
 

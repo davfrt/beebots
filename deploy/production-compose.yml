@@ -3,9 +3,31 @@ services:
     image: ${ENGINE_IMAGE:?Source deploy/release.env before deploying}
     environment:
       APP_VERSION: ${RELEASE:?Source deploy/release.env before deploying}
+      BACKUP_STATUS_PATH: /backup-status/status.json
+    volumes:
+      - backup-status:/backup-status:ro
   web:
     image: ${WEB_IMAGE:?Source deploy/release.env before deploying}
     environment:
       SITE_ADDRESS: ${PUBLIC_DOMAIN:?Set PUBLIC_DOMAIN to the HTTPS domain before deploying}
   backup:
     image: ${BACKUP_IMAGE:?Source deploy/release.env before deploying}
+    environment:
+      BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:?Set the off-host age public key}
+      BACKUP_SSH_TARGET: ${BACKUP_SSH_TARGET:?Set the off-host SSH destination}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+    volumes:
+      - bees-data:/data:ro
+      - backup-status:/status
+      - ${BACKUP_SSH_KEY_FILE:?Set the backup SSH key file}:/run/secrets/backup_ssh_key:ro
+      - ${BACKUP_SSH_KNOWN_HOSTS_FILE:?Set the backup SSH known-hosts file}:/run/secrets/backup_known_hosts:ro
+      - ${BACKUP_RELEASE_MANIFEST_FILE:-./deploy/release.env}:/config/release.env:ro
+    read_only: true
+    tmpfs: [/work]
+    networks: [backup-net]
+
+volumes:
+  backup-status:
+
+networks:
+  backup-net:

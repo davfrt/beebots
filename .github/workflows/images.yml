@@ -44,7 +44,10 @@ jobs:
       - run: docker compose exec -T engine id -u | grep -x 1000
       - run: docker compose exec -T web id -u | grep -x 1000
       - run: docker compose exec -T backup id -u | grep -x 1000
-      - run: docker compose exec -T backup sh -c "sqlite3 /data/smoke.sqlite 'CREATE TABLE smoke (value TEXT); INSERT INTO smoke VALUES (\"ok\");' && mkdir -p /data/backups && sqlite3 /data/smoke.sqlite '.backup /data/backups/smoke.sqlite' && sqlite3 /data/restored.sqlite '.restore /data/backups/smoke.sqlite' && test \"\$(sqlite3 /data/restored.sqlite 'SELECT value FROM smoke')\" = ok"
+      - run: docker compose exec -T engine node -e "const d=new (require('node:sqlite').DatabaseSync)('/data/bees-dry.sqlite');d.exec(\"CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT); INSERT INTO meta VALUES ('mode','dry')\");d.close();require('node:fs').writeFileSync('/data/settings.json', JSON.stringify({version:1,jevKey:'12345678',acceptedRiskAt:0,createdAt:0,bees:[{name:'One',style:'bizzy'},{name:'Two',style:'breezy'},{name:'Three',style:'boozy'}]}))"
+      - run: docker compose exec -T backup sh -c "mkdir -p /work/bin /work/offhost /work/restored && printf '#!/bin/sh\\nexit 0\\n' >/work/bin/ssh && printf '#!/bin/sh\\nfor x; do case \"\$x\" in /work/*.age) cp \"\$x\" /work/offhost/;; esac; done\\n' >/work/bin/scp && chmod 755 /work/bin/ssh /work/bin/scp && age-keygen -o /work/key.txt && : >/work/known && BACKUP_ONCE=true BACKUP_AGE_RECIPIENT=\"\$(grep '^# public key:' /work/key.txt | cut -d' ' -f4)\" BACKUP_SSH_TARGET=backup@mock:/archive BACKUP_SSH_KEY_PATH=/work/key.txt BACKUP_SSH_KNOWN_HOSTS_PATH=/work/known PATH=/work/bin:\$PATH backup.sh && grep -F '\"ok\":true' /status/status.json && restore.sh \"\$(find /work/offhost -name '*.age')\" /work/key.txt /work/restored"
+      - run: docker compose exec -T backup tar -C /work/restored -cf - . | docker compose exec -T engine tar -C /data -xf -
+      - run: docker compose stop engine && timeout 10 docker run --rm --network none --volumes-from "$(docker compose ps -q --all engine)" -e DB_PATH=/data/bees-{mode}.sqlite -e SETTINGS_PATH=/data/settings.json -e ENGINE_BIND=0.0.0.0 -e UPDATE_CHECK=false beebots-engine:local 2>&1 | grep -F 'engine http listening'
       - if: always()
         run: docker compose logs --no-color
       - if: always()
