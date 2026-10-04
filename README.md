@@ -53,8 +53,7 @@ Setup has no code to find: the page is open to whoever reaches the server first.
   `beebots` project → **Restart** on the `engine` container, or `docker compose restart engine`.
 - **Caps** on the calls that cost money (designs and portraits), in total and per visitor.
 
-Set up right after deploying, and use a domain with HTTPS if you can (`PUBLIC_DOMAIN`, below) so your keys don't
-travel over plain HTTP.
+Setup is available only through the configured HTTPS domain; public HTTP redirects before any key can be entered.
 
 Each bee gets its own portrait, painted in the same style as the originals:
 
@@ -67,25 +66,19 @@ Each bee starts with $333 of paper money. Jev spending is capped at $2 a day by 
 
 ### Already have a server?
 
-Any machine with Docker works:
-
-```sh
-curl -fsSLO https://raw.githubusercontent.com/imikerussell/beebots/main/docker-compose.yml
-docker compose up -d
-```
-
-Then open `http://<your-server-ip>/`.
+Deploy a published release manifest, not a source checkout. Follow [the production release instructions](deploy/RELEASE.md):
+the manifest pins the engine, dashboard, and backup images by digest and requires an HTTPS domain before Setup opens.
 
 ### Updating
 
 New versions are published as [releases](https://github.com/imikerussell/beebots/releases). When one is out, your
 dashboard shows **Update available** next to the trading mode, linking to what's new. Nothing updates by itself.
 
-To update, pull the new images and restart. Your bees, settings and history live in Docker volumes and are kept:
+To update, use the new release's manifest. Your bees, settings and history live in Docker volumes and are kept:
 
 ```sh
-docker compose pull
-docker compose up -d
+docker compose --env-file deploy/release.env pull
+docker compose --env-file deploy/release.env up -d
 ```
 
 Run it over SSH (or hPanel's browser terminal on Hostinger) in the folder that holds your `docker-compose.yml`
@@ -160,10 +153,16 @@ in [`.env.example`](.env.example). The common ones:
 
 | setting | default | what it does |
 |---|---|---|
-| `PUBLIC_DOMAIN` | blank | A domain pointed at your server. Caddy then gets an HTTPS certificate on its own. **Recommended**: without it, the Setup page and your keys travel over plain HTTP. |
-| `TICK_MS` | `10000` | How often each bee asks Jev. Faster is more exciting and costs more (see [docs/COSTS.md](docs/COSTS.md)). |
+| `PUBLIC_DOMAIN` | required | A domain pointed at your server. Caddy obtains a certificate and redirects HTTP before Setup can receive keys. |
+| `TICK_MS` | `60000` | How often each bee asks Jev. Safety checks remain on `SAFETY_TICK_MS=10000` (see [docs/COSTS.md](docs/COSTS.md)). |
 | `JEV_DAILY_USD_CAP` | `2` | Hard daily cap on Jev spend. When it's hit, every bee holds until 00:00 UTC. |
 | `BEE_START_EQUITY_USD` | `333` | Paper money per bee. |
+
+### Daily Hive competition
+
+This fork can observe the public Hive, run the next three strategies on paper, and select a daily champion. It is
+off by default. See [docs/COMPETITION.md](docs/COMPETITION.md) before enabling it, especially for the two-account
+live handoff and native OKX stops.
 
 **Run Setup again** (new names, new keys, or a forgotten owner password):
 
