@@ -1324,7 +1324,7 @@ export class Engine {
       if (this.ids.some((id) => this.d.db.hasUnresolvedExposureOrder(id))) reasons.push("unresolved exchange order");
       if (this.ids.some((id) => this.bees[id].position && !this.protectionVerified.has(id))) reasons.push("position lacks verified native protection");
     }
-    return { ok: reasons.length === 0, reasons, mode: this.d.cfg.mode, closed: this.closedAt !== null, flat: this.ids.every((id) => !this.bees[id].position), marketAgeMs: age, safetyAgeMs: this.lastSafetyAt ? now - this.lastSafetyAt : null, reconciliationAgeMs: this.recon.ts ? now - this.recon.ts : null, exchangeReadAgeMs: this.lastExchangeReadAt ? now - this.lastExchangeReadAt : null, uptimeS: Math.round((now - this.startedAt) / 1000) };
+    return { ok: reasons.length === 0, reasons, release: this.d.cfg.update.version, mode: this.d.cfg.mode, closed: this.closedAt !== null, flat: this.ids.every((id) => !this.bees[id].position), marketAgeMs: age, safetyAgeMs: this.lastSafetyAt ? now - this.lastSafetyAt : null, reconciliationAgeMs: this.recon.ts ? now - this.recon.ts : null, exchangeReadAgeMs: this.lastExchangeReadAt ? now - this.lastExchangeReadAt : null, uptimeS: Math.round((now - this.startedAt) / 1000) };
   }
 }
 

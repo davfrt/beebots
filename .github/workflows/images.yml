@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 jobs:
@@ -28,6 +28,12 @@ jobs:
   smoke:
     needs: test
     runs-on: ubuntu-latest
+    env:
+      RELEASE: smoke
+      ENGINE_IMAGE: beebots-engine:local
+      WEB_IMAGE: beebots-web:local
+      BACKUP_IMAGE: beebots-backup:local
+      PUBLIC_DOMAIN: :80
     steps:
       - uses: actions/checkout@v4
       - run: echo "source_revision=$GITHUB_SHA"
@@ -86,3 +92,27 @@ jobs:
           build-args: APP_VERSION=${{ steps.tags.outputs.version }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  manifest:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: owner
+        run: echo "lc=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+      - run: |
+          release="$GITHUB_REF_NAME"
+          for name in engine web backup; do
+            image="ghcr.io/${{ steps.owner.outputs.lc }}/beebots-$name"
+            digest="$(docker buildx imagetools inspect "$image:$GITHUB_SHA" --format '{{.Digest}}')"
+            printf '%s_IMAGE=%s@%s\n' "${name^^}" "$image" "$digest" >> release.env
+          done
+          printf 'RELEASE=%s\n' "$release" >> release.env
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release.env

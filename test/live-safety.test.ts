@@ -20,7 +20,7 @@ describe("live safety health", () => {
 
     await engine.start();
     await engine.tick();
-    expect(engine.health().ok).toBe(true);
+    expect(engine.health()).toMatchObject({ ok: true, release: "dev" });
     now += 5 * cfg.safetyTickMs;
     expect(engine.health()).toMatchObject({ ok: false, reasons: expect.arrayContaining(["safety loop stale"]) });
     await engine.tick();
@@ -29,7 +29,7 @@ describe("live safety health", () => {
   });
 
   it("fails competition health when live is unsafe despite healthy paper", () => {
-    const paper = { ok: true, reasons: [], mode: "dry" as const, closed: false, flat: true, marketAgeMs: 0, safetyAgeMs: 0, reconciliationAgeMs: null, exchangeReadAgeMs: null, uptimeS: 1 };
+    const paper = { ok: true, reasons: [], release: "test", mode: "dry" as const, closed: false, flat: true, marketAgeMs: 0, safetyAgeMs: 0, reconciliationAgeMs: null, exchangeReadAgeMs: null, uptimeS: 1 };
     const live = { ...paper, ok: false, reasons: ["exchange reads stale"], mode: "live" as const };
     expect(aggregateCompetitionHealth(paper, live)).toMatchObject({ ok: false, reasons: ["exchange reads stale"], live });
   });

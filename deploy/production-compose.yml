@@ -1,0 +1,11 @@
+services:
+  engine:
+    image: ${ENGINE_IMAGE:?Source deploy/release.env before deploying}
+    environment:
+      APP_VERSION: ${RELEASE:?Source deploy/release.env before deploying}
+  web:
+    image: ${WEB_IMAGE:?Source deploy/release.env before deploying}
+    environment:
+      SITE_ADDRESS: ${PUBLIC_DOMAIN:?Set PUBLIC_DOMAIN to the HTTPS domain before deploying}
+  backup:
+    image: ${BACKUP_IMAGE:?Source deploy/release.env before deploying}
