@@ -77,8 +77,8 @@ dashboard shows **Update available** next to the trading mode, linking to what's
 To update, use the new release's manifest. Your bees, settings and history live in Docker volumes and are kept:
 
 ```sh
-docker compose --env-file deploy/release.env pull
-docker compose --env-file deploy/release.env up -d
+docker compose --env-file deploy/release.env -f docker-compose.yml -f deploy/production-compose.yml pull
+docker compose --env-file deploy/release.env -f docker-compose.yml -f deploy/production-compose.yml up -d
 ```
 
 Run it over SSH (or hPanel's browser terminal on Hostinger) in the folder that holds your `docker-compose.yml`
