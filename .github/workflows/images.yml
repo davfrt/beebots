@@ -33,10 +33,12 @@ jobs:
       - run: echo "source_revision=$GITHUB_SHA"
       - run: docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
       - run: curl --fail --retry 20 --retry-connrefused http://127.0.0.1/health
+      - run: curl --fail http://127.0.0.1/
       - run: test "$(curl --silent --output /dev/null --write-out '%{http_code}' -X POST http://127.0.0.1/snapshot)" = 405
       - run: docker compose exec -T engine id -u | grep -x 1000
       - run: docker compose exec -T web id -u | grep -x 1000
       - run: docker compose exec -T backup id -u | grep -x 1000
+      - run: docker compose exec -T backup sh -c "sqlite3 /data/smoke.sqlite 'CREATE TABLE smoke (value TEXT); INSERT INTO smoke VALUES (\"ok\");' && mkdir -p /data/backups && sqlite3 /data/smoke.sqlite '.backup /data/backups/smoke.sqlite' && sqlite3 /data/restored.sqlite '.restore /data/backups/smoke.sqlite' && test \"\$(sqlite3 /data/restored.sqlite 'SELECT value FROM smoke')\" = ok"
       - if: always()
         run: docker compose logs --no-color
       - if: always()
