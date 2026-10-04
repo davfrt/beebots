@@ -17,11 +17,14 @@ export interface ServerDeps {
   engine?: {
     bus: EventBus;
     db: Db;
+    /** Separate live ledger in competition mode. */
+    liveDb?: Db;
     snapshot: () => unknown;
     health: () => { ok: boolean; [k: string]: unknown };
     visitors: Visitors;
     /** "Update available" (update.ts): null unless a newer GitHub Release exists. */
     update?: () => unknown;
+    competition?: () => unknown;
   };
   /** Present only in setup mode. */
   setup?: Setup;
@@ -29,8 +32,8 @@ export interface ServerDeps {
   hive?: Hive;
   /** Names, styles and portraits of the bees, for the dashboard. No secrets. */
   profile: () => unknown;
-  /** File path of a bee's generated portrait, or null. */
-  beeImage: (bee: string) => string | null;
+  /** File path or trusted remote URL of a bee's portrait, or null. */
+  beeImage: (bee: string) => string | URL | null;
 }
 
 const MAX_BUFFERED = 1024 * 1024;
@@ -51,6 +54,7 @@ export function startServer(deps: ServerDeps, port: number, bind: string): Serve
   const streams = new Map<string, number>();
   let streamsTotal = 0;
   const historyCache = new Map<number, { at: number; body: string }>();
+  const portraitCache = new Map<string, { expires: number; bytes: Promise<Buffer> }>();
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     if (deps.setup && url.pathname.startsWith("/setup/")) {
@@ -73,6 +77,31 @@ export function startServer(deps: ServerDeps, port: number, bind: string): Serve
     if (url.pathname.startsWith("/bee-image/")) {
       const file = deps.beeImage(url.pathname.slice("/bee-image/".length));
       if (!file) return json(res, 404, { error: "not found" });
+      if (file instanceof URL) {
+        let portrait = portraitCache.get(file.href);
+        if (!portrait || portrait.expires < Date.now()) {
+          if (portraitCache.size > 20) portraitCache.clear();
+          const bytes = fetch(file, { signal: AbortSignal.timeout(15_000) }).then(async (upstream) => {
+            if (!upstream.ok || !upstream.body) throw new Error("portrait unavailable");
+            const chunks: Uint8Array[] = [];
+            let size = 0;
+            for await (const chunk of upstream.body) {
+              size += chunk.length;
+              if (size > 5 * 1024 * 1024) throw new Error("portrait too large");
+              chunks.push(chunk);
+            }
+            return Buffer.concat(chunks, size);
+          });
+          portrait = { expires: Date.now() + 300_000, bytes };
+          portraitCache.set(file.href, portrait);
+          void bytes.catch(() => portraitCache.delete(file.href));
+        }
+        void portrait.bytes.then((bytes) => {
+          res.writeHead(200, { "content-type": "image/jpeg", "cache-control": "public, max-age=300" });
+          res.end(bytes);
+        }).catch(() => json(res, 502, { error: "portrait unavailable" }));
+        return;
+      }
       res.writeHead(200, { "content-type": "image/jpeg", "cache-control": "public, max-age=300" });
       createReadStream(file).pipe(res);
       return;
@@ -80,7 +109,7 @@ export function startServer(deps: ServerDeps, port: number, bind: string): Serve
     const e = deps.engine;
     if (!e) {
       // Setup mode: healthy (so Docker leaves it alone), and nothing else to read yet.
-      if (url.pathname === "/health") return json(res, 200, { ok: true, setup: true });
+        if (url.pathname === "/health") return json(res, 200, { ok: true, setup: true, release: process.env.APP_VERSION?.trim() || "dev" });
       return json(res, 503, { error: "setup needed", setup: true });
     }
 
@@ -90,14 +119,18 @@ export function startServer(deps: ServerDeps, port: number, bind: string): Serve
         return json(res, h.ok ? 200 : 503, h);
       }
       case "/snapshot":
-        return json(res, 200, { ...(e.snapshot() as object), visitors: { total: e.visitors.total, watching: e.bus.subscribers }, update: e.update?.() ?? null });
+        return json(res, 200, { ...(e.snapshot() as object), visitors: { total: e.visitors.total, watching: e.bus.subscribers }, update: e.update?.() ?? null, competition: e.competition?.() ?? null });
       case "/visit": {
         const total = e.visitors.visit(clientAddr(req.headers["x-forwarded-for"], req.socket.remoteAddress));
         return json(res, 200, { total, watching: e.bus.subscribers });
       }
       case "/equity": {
+        const db = url.searchParams.get("book") === "live" ? e.liveDb : e.db;
+        if (!db) return json(res, 404, { error: "equity book not found" });
+        const requestedSince = Number(url.searchParams.get("since"));
         const days = Math.max(0.01, Math.min(60, Number(url.searchParams.get("days") ?? 30) || 30));
-        return json(res, 200, e.db.equitySeries(Date.now() - days * 86_400_000, 720));
+        const since = Number.isFinite(requestedSince) && requestedSince > 0 ? Math.min(Date.now(), requestedSince) : Date.now() - days * 86_400_000;
+        return json(res, 200, db.equitySeries(since, 720));
       }
       case "/history": {
         const n = Math.max(1, Math.min(MAX_HISTORY, Number(url.searchParams.get("n") ?? MAX_HISTORY) || MAX_HISTORY));

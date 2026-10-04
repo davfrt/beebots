@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import type { BeeDesign } from "../src/openai.js";
@@ -72,6 +72,11 @@ async function boot(opts: { designs?: BeeDesign[] } = {}) {
 }
 
 describe("setup", () => {
+  it("reports the release while Setup is open", async () => {
+    const t = await boot();
+    expect(await (await fetch(`${t.base}/health`)).json()).toMatchObject({ ok: true, setup: true, release: "dev" });
+  });
+
   it("needs no code: the page can write straight away", async () => {
     const t = await boot();
     expect((await t.post("/setup/check-jev", { key: "good-jev-key" })).status).toBe(200);
@@ -176,6 +181,20 @@ describe("setup", () => {
     const noKey: Record<string, unknown> = { ...SAVE };
     delete noKey.openaiKey;
     expect((await t.post("/setup/save", noKey)).status).toBe(400);
+  });
+
+  it("starts with the built-in bees without an OpenAI key", async () => {
+    const t = await boot();
+    for (const style of ["bizzy", "breezy", "boozy"]) writeFileSync(join(dirname(t.settingsPath), `${style}.jpg`), "jpeg");
+    const body: Record<string, unknown> = { ...SAVE, useDefaults: true };
+    delete body.openaiKey;
+    delete body.bees;
+    expect((await t.post("/setup/save", body)).status).toBe(200);
+    expect(loadSettings(t.settingsPath)!.bees).toMatchObject([
+      { name: "Bizzy", style: "bizzy", image: true },
+      { name: "Breezy", style: "breezy", image: true },
+      { name: "Boozy", style: "boozy", image: true },
+    ]);
   });
 
   it("re-checks coins and the brain on save: unknown coins dropped, style forced from the coins", async () => {
