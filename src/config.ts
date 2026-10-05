@@ -181,6 +181,16 @@ const EnvSchema = z.object({
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).optional().default("info"),
   ALERT_WEBHOOK_URL: opt,
   DEAD_MAN_URL: opt,
+  // The Beekeeper (keeper.ts, docs/BEEKEEPER.md). Normally connected from the dashboard (keeper.json); anything set
+  // here wins. BEEKEEPER_WEBHOOK_URL is the Zap's Catch Hook; PUBLIC_URL is where the Zap finds this engine.
+  BEEKEEPER_WEBHOOK_URL: opt,
+  PUBLIC_URL: opt,
+  PUBLIC_DOMAIN: opt,
+  BEEKEEPER_EVERY_HOURS: opt,
+  // Optional ramp-up from this time (ISO or unix ms): hourly for 12 h, every 2 h for 12 h, every 3 h for 12 h.
+  BEEKEEPER_RAMP_START: opt,
+  // Optional second key for the Beekeeper's door (lab/door.ts), for people who script their own engine. 32+ characters.
+  LAB_SECRET: opt,
 }).superRefine((values, ctx) => {
   for (const [name, limit] of Object.entries(numericLimits)) {
     const value = (values as Record<string, unknown>)[name];
@@ -202,6 +212,19 @@ const EnvSchema = z.object({
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["JEV_DECISION_RESERVE_USD"], message: "must not exceed JEV_DAILY_USD_CAP" });
   }
 });
+
+/** "https://host[:port]" from a URL with no path, query or login in it; null for anything else. */
+export function originOf(v: string, schemes: readonly string[] = ["http:", "https:"]): string | null {
+  let u: URL;
+  try {
+    u = new URL(v.trim());
+  } catch {
+    return null;
+  }
+  if (!schemes.includes(u.protocol) || !u.hostname || u.username || u.password || u.search || u.hash) return null;
+  if (u.pathname !== "/" && u.pathname !== "") return null;
+  return u.origin;
+}
 
 export interface BeeKnobs {
   maxTradesPerDay: number;
@@ -281,6 +304,10 @@ export interface Config {
     /** Behavior-changing inputs bound into a candidate's execution identity. */
     identity: unknown;
   };
+  /** The Beekeeper's settings from the environment only (keeper.json fills in whatever is unset here). Never logged. */
+  keeper: { hookUrl?: string; publicUrl?: string; everyHours?: number; rampStart?: string };
+  /** The door's optional second key. Never logged, never sent anywhere. */
+  lab: { secret?: string };
 }
 
 export class ConfigError extends Error {}
@@ -301,6 +328,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, settings: Setti
   if (mode === "live" && e.LIVE_ACK !== LIVE_ACK_PHRASE) {
     throw new ConfigError(`MODE=live moves real money. Set LIVE_ACK=${LIVE_ACK_PHRASE} to confirm you accept the risk, or go back to DRY_RUN=true.`);
   }
+
+  if (e.BEEKEEPER_WEBHOOK_URL && !/^https:\/\//.test(e.BEEKEEPER_WEBHOOK_URL)) throw new ConfigError("BEEKEEPER_WEBHOOK_URL must start with https://");
+  const everyHours = e.BEEKEEPER_EVERY_HOURS === undefined ? undefined : Number(e.BEEKEEPER_EVERY_HOURS);
+  if (everyHours !== undefined && !(everyHours >= 0.25)) throw new ConfigError("BEEKEEPER_EVERY_HOURS must be a number, at least 0.25");
+  if (e.PUBLIC_URL && !originOf(e.PUBLIC_URL)) throw new ConfigError("PUBLIC_URL must look like https://your-domain or http://your-server-ip (no path)");
+  // PUBLIC_DOMAIN is Caddy's site address. When it is a plain domain, the engine's public address follows from it.
+  const publicUrl = (e.PUBLIC_URL ? originOf(e.PUBLIC_URL) : null) ?? (e.PUBLIC_DOMAIN && /^[a-z0-9.-]+$/i.test(e.PUBLIC_DOMAIN) ? originOf(`https://${e.PUBLIC_DOMAIN}`) : null) ?? undefined;
 
   const slots = {} as Record<BeeId, SlotProfile>;
   BEES.forEach((id, i) => {
@@ -408,5 +442,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, settings: Setti
         },
       },
     },
+    keeper: { hookUrl: e.BEEKEEPER_WEBHOOK_URL, publicUrl, everyHours, rampStart: e.BEEKEEPER_RAMP_START },
+    lab: { secret: e.LAB_SECRET },
   };
 }

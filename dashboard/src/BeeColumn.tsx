@@ -184,6 +184,7 @@ export function BeeColumn({ name, bee, curve, baseline, rank, gap, flash, identi
       </div>}
 
       {flashing && flash.kind === "funding" && <div className="funding-chip num">{flash.text}</div>}
+      {flashing && flash.kind === "keeper" && <div className="funding-chip keeper-chip">🧑‍🌾 new rules: {flash.text}</div>}
     </section>
   );
 }

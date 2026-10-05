@@ -23,7 +23,7 @@ describe("a rejected new order pauses that bee's new orders", () => {
     const cfg = testConfig({ DRY_RUN: "true" });
     const v = view([coin("ENA", { ret24hPct: 25, ret7dPct: 43 }), coin("SUI", { ret24hPct: 12, ret7dPct: 40 })]);
     let now = NOW;
-    const feed = { view: () => v, refresh: async () => {}, refreshTickers: async () => {}, get lastRefreshAt() { return now; } } as unknown as MarketFeed;
+    const feed = { view: () => v, refresh: async () => {}, refreshTickers: async () => { for (const [id, t] of v.tickers) { t.ts = now; v.statsAt.set(id, now); } }, get lastRefreshAt() { return now; } } as unknown as MarketFeed;
     const client: SystemOne = {
       async systemOne() {
         return { model: "fake", usage: { input_tokens: 100, output_tokens: 0 }, answers: { action: { type: "choice", choice: "APE_ENA", confidence: 0.9, probabilities: { APE_ENA: 0.9, APE_SUI: 0.1 } }, conviction: { type: "score", score: 3, confidence: 1, legend: {}, probabilities: {} } } } as never;
@@ -55,7 +55,6 @@ describe("a rejected new order pauses that bee's new orders", () => {
     const db = new Db(":memory:");
     const engine = new Engine({ cfg, db, feed, jev: new Jev({ ...cfg.jev, client, now: () => now }), exec, bus: new EventBus(db), alerts: { send: (t: string) => alerts.push(t) } as unknown as Alerts, now: () => now });
     await engine.start();
-    engine.stop();
     for (const id of ["bee1", "bee2"] as const) engine.bees[id].cap = "trade_cap"; // only the Momentum bee acts
     engine.bees.bee3.flatSince = now - 60 * 60_000;
     await engine.tick();
@@ -70,5 +69,6 @@ describe("a rejected new order pauses that bee's new orders", () => {
     now += ORDER_REJECT_PAUSE_MS;
     await engine.tick();
     expect(sent.filter((s) => s.startsWith("bee3")).length).toBe(2);
+    engine.stop();
   });
 });

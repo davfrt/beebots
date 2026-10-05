@@ -15,8 +15,12 @@ Cost per day = `3 bees × (86,400,000 / TICK_MS) × tokens_per_call × $0.042 / 
 | 2 s | 800 | 90 | $4.35 | $131 |
 | 3 s | 800 | 60 | $2.90 | $87 |
 | 5 s | 800 | 36 | $1.74 | $52 |
+| 10 s | 800 | 18 | $0.87 | $26 |
+| 30 s | 800 | 6 | $0.29 | $8.71 |
+| 60 s | 600 | 3 | $0.11 | $3.27 |
+| 60 s | 800 | 3 | $0.15 | $4.35 |
 
-**Recommendation:** start at `TICK_MS=2000` with `JEV_DAILY_USD_CAP=5`. Drop to 1 s for filming sessions if the shot needs more motion. Measure real `usage.input_tokens` in phase 4; the table is only as good as the tokens-per-call guess.
+**Recommendation:** use `TICK_MS=60000`; `SAFETY_TICK_MS=10000` keeps deterministic exits responsive without paying for six mostly unchanged Jev calls per minute. The competition runtime can have five active strategies during a live handoff, giving a maximum model estimate of about $5.45-$7.25/month at this cadence. Actual use is lower when the rules do not need Jev.
 
 ## 2. OKX trading fees (X-Perps, EEA)
 
@@ -48,6 +52,6 @@ X-Perps charge continuous funding, settled at 00:00, 08:00 and 16:00 UTC, capped
 | Coinbase → OKX (USDC on Base) | cents |
 | OKX → Coinbase (USDC on Arbitrum) | 0.0065 USDC (Base 0.042, **never Ethereum mainnet: 1.46**) |
 
-## 5. All-in for the 30-day run (budget ceiling)
+## 5. Competition runtime
 
-Jev ~$90-200, trading fees ≤ $150, funding ~$10-15, VPS ~$9, domain ~$27. **About $290-400 of friction on a $1,000 stake.** That is exactly why the cost counters belong on screen: the bees have to beat the house, and viewers can watch the house take its cut in real time.
+Model use is about $5.45-$7.25/month when all three paper slots and both live handoff slots continuously need Jev. Trading fees, spread and funding depend on the selected strategies and their turnover; they cannot be predicted from the Hive leaderboard.

@@ -38,11 +38,11 @@ describe("configuration validation before live startup", () => {
     }
   });
 
-  it("retains zero-valued budgets and cooldowns that safely disable spending or waiting", () => {
-    const cfg = loadConfig({ ...liveEnv, JEV_DAILY_USD_CAP: "0", MAX_NOTIONAL_USD_PER_BEE: "0", BIZZY_FEE_BUDGET_USD_DAY: "0", BIZZY_COOLDOWN_MINUTES: "0" });
+  it("retains zero-valued budgets that safely disable spending", () => {
+    const cfg = loadConfig({ ...liveEnv, JEV_DAILY_USD_CAP: "0", MAX_NOTIONAL_USD_PER_BEE: "0", BIZZY_FEE_BUDGET_USD_DAY: "0" });
     expect(cfg.jev.dailyUsdCap).toBe(0);
     expect(cfg.risk.maxNotionalUsdPerBee).toBe(0);
-    expect(cfg.bees.bizzy).toMatchObject({ feeBudgetUsdDay: 0, cooldownMinutes: 0 });
+    expect(cfg.bees.bizzy.feeBudgetUsdDay).toBe(0);
   });
 
   it("enforces the domain bounds of fractions, loss thresholds, counts, and stop distances", () => {
@@ -52,11 +52,13 @@ describe("configuration validation before live startup", () => {
       LIVE_SIZE_MULTIPLIER: ["1.01"], BIZZY_SIZE_FRACTION: ["0", "1.01"],
       BREEZY_MIN_OPEN_PROB: ["1.01"], TAKER_FEE_RATE: ["1", "1.01"], JEV_USD_PER_MTOK: ["0"],
       BIZZY_UNIVERSE_SIZE: ["0", "1.5"], BOOZY_CANDIDATES: ["0", "1.5"], BIZZY_TIME_STOP_MINUTES: ["0"],
+      LIVE_RAMP_HOURS: ["0", "168.01"], BIZZY_FEE_BUDGET_USD_DAY: ["26.65"],
     };
     for (const style of ["BIZZY", "BREEZY", "BOOZY"]) {
-      invalid[`${style}_MAX_TRADES_PER_DAY`] = ["1.5"];
-      invalid[`${style}_SPREAD_GATE_BPS`] = ["10001"];
-      invalid[`${style}_STOP_ATR_MULT`] = ["0"];
+      invalid[`${style}_MAX_TRADES_PER_DAY`] = ["1.5", "101"];
+      invalid[`${style}_SPREAD_GATE_BPS`] = ["101"];
+      invalid[`${style}_COOLDOWN_MINUTES`] = ["0"];
+      invalid[`${style}_STOP_ATR_MULT`] = ["0", "10.01"];
     }
     for (const [name, values] of Object.entries(invalid)) {
       for (const value of values) expect(() => loadConfig({ ...liveEnv, [name]: value }), `${name}=${value}`).toThrow(new RegExp(name));
@@ -66,12 +68,13 @@ describe("configuration validation before live startup", () => {
   it("accepts safe boundaries without silently changing them", () => {
     const cfg = loadConfig({ ...liveEnv, LIVE_SIZE_MULTIPLIER: "0", MAX_LEVERAGE: "2", DAILY_LOSS_STOP_PCT: "0.01",
       BEE_RETIRE_AT_PCT: "100", BREEZY_MIN_OPEN_PROB: "1", BIZZY_SIZE_FRACTION: "1", TAKER_FEE_RATE: "0",
-      BIZZY_UNIVERSE_SIZE: "1", BOOZY_CANDIDATES: "1", BIZZY_MAX_TRADES_PER_DAY: "0", BIZZY_SPREAD_GATE_BPS: "10000" });
+      BIZZY_UNIVERSE_SIZE: "1", BOOZY_CANDIDATES: "1", BIZZY_MAX_TRADES_PER_DAY: "0", BIZZY_SPREAD_GATE_BPS: "100", BIZZY_STOP_ATR_MULT: "10",
+      BIZZY_FEE_BUDGET_USD_DAY: "0", BREEZY_FEE_BUDGET_USD_DAY: "0", BOOZY_FEE_BUDGET_USD_DAY: "0" });
     expect(cfg.risk).toMatchObject({ liveSizeMultiplier: 0, maxLeverage: 2, dailyLossStopPct: 0.01, retireAtPct: 100, takerFeeRate: 0 });
     expect(cfg.bizzy).toMatchObject({ sizeFraction: 1, universeSize: 1 });
     expect(cfg.boozy.candidates).toBe(1);
     expect(cfg.breezy.minOpenProb).toBe(1);
-    expect(cfg.bees.bizzy).toMatchObject({ maxTradesPerDay: 0, spreadGateBps: 10000 });
+    expect(cfg.bees.bizzy).toMatchObject({ maxTradesPerDay: 0, spreadGateBps: 100, stopAtrMult: 10 });
     expect(loadConfig({ ...liveEnv, LIVE_SIZE_MULTIPLIER: "1" }).risk.liveSizeMultiplier).toBe(1);
   });
 

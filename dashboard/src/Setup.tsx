@@ -92,6 +92,7 @@ export function Setup() {
   const [jevOk, setJevOk] = useState(false);
   const [openaiKey, setOpenaiKey] = useState("");
   const [openaiOk, setOpenaiOk] = useState(false);
+  const [useDefaults, setUseDefaults] = useState(false);
   const [bees, setBees] = useState<BeeDraft[]>([]);
   const [hive, setHive] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -147,6 +148,19 @@ export function Setup() {
 
   const patchDesign = (i: number, p: Partial<Design>) => setBees((bs) => bs.map((b, j) => (j === i && b.design ? { ...b, design: { ...b.design, ...p } } : b)));
 
+  const chooseDefaults = () => {
+    if (!status) return;
+    setUseDefaults(true);
+    setBees(status.styles.map((s) => ({
+      ask: "",
+      design: { name: s.name, tagline: s.tagline, rules: s.blurb, coins: [], baseStyle: s.id, styleLabel: s.label, look: "built-in bee" },
+      img: `/bees/${s.id}.jpg`,
+      busy: "",
+      error: "",
+    })));
+    setStep(5);
+  };
+
   const create = async (i: number) => {
     const b = bees[i]!;
     patch(i, { busy: "design", error: "" });
@@ -176,9 +190,10 @@ export function Setup() {
       await post("save", {
         jevKey,
         ...(openaiKey ? { openaiKey } : {}),
+        useDefaults,
         accept,
         ownerPassword: password,
-        bees: bees.map((b) => ({
+        ...(!useDefaults ? { bees: bees.map((b) => ({
           name: b.design!.name.trim(),
           style: b.design!.baseStyle,
           tagline: b.design!.tagline.trim(),
@@ -186,7 +201,7 @@ export function Setup() {
           coins: b.design!.coins,
           look: b.design!.look,
           image: !!b.img,
-        })),
+        })) } : {}),
         hive,
       });
       setDone(true);
@@ -353,9 +368,10 @@ export function Setup() {
           <section>
             <h2>OpenAI key</h2>
             <p>
-              Required. OpenAI designs each bee's trading style from a sentence you write, and paints its portrait. A design is one quick, cheap
+              Optional. OpenAI designs each bee's trading style from a sentence you write, and paints its portrait. A design is one quick, cheap
               ChatGPT call; a portrait takes about 40 seconds and a few cents. The key is only used on this page.
             </p>
+            <p className="dim">No OpenAI key? Start with the built-in Breakout, Trend, and Momentum bees.</p>
             {status.serverHasOpenAiKey ? (
               <p className="setup-ok">✓ The server already has an OpenAI key.</p>
             ) : (
@@ -375,8 +391,9 @@ export function Setup() {
               <button className="ghost" onClick={() => setStep(2)}>
                 Back
               </button>
+              <button className="ghost" disabled={busy} onClick={chooseDefaults}>Use built-in bees</button>
               {hasOpenAi ? (
-                <button onClick={() => setStep(4)}>Next</button>
+                <button onClick={() => (setUseDefaults(false), setStep(4))}>Design my bees</button>
               ) : (
                 <button disabled={busy || openaiKey.trim().length < 8} onClick={() => run(async () => (await post("check-openai", { openaiKey: openaiKey.trim() }), setOpenaiOk(true)))}>
                   {busy ? "Checking…" : "Check key"}
@@ -468,7 +485,7 @@ export function Setup() {
             </p>
             <div className="setup-hive">{HIVE_DISCLAIMER}</div>
             <div className="setup-actions">
-              <button className="ghost" onClick={() => setStep(4)}>
+              <button className="ghost" onClick={() => setStep(useDefaults ? 3 : 4)}>
                 Back
               </button>
               <button className="ghost" onClick={() => (setHive(false), setStep(6))}>
@@ -502,6 +519,13 @@ export function Setup() {
               {hive
                 ? "Your bees join the Hive when the engine starts. You can leave any time from the dashboard."
                 : "Your bees stay off the Hive. You can join later from the dashboard."}
+            </p>
+            <p className="dim small">
+              Optional, once you are trading: give your bees a coach. The <b>Beekeeper</b> card on your dashboard connects a Zap on Zapier that can rewrite a
+              losing bee's rules.{" "}
+              <a href="https://github.com/imikerussell/beebots/blob/main/docs/BEEKEEPER.md" target="_blank" rel="noopener">
+                How it works ↗
+              </a>
             </p>
             <div className="setup-actions">
               <button className="ghost" onClick={() => setStep(5)}>

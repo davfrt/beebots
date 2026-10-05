@@ -19,6 +19,7 @@ COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --chown=node:node package.json ./
 COPY --chown=node:node scripts/okx-profiles.sh ./scripts/okx-profiles.sh
+RUN sed -i 's/\r$//' ./scripts/okx-profiles.sh
 # The three original portraits: the default art, and the style reference for generated bees.
 COPY --chown=node:node dashboard/public/bees ./ref
 USER node

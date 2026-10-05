@@ -116,6 +116,8 @@ export function mark(bee: BeeState, markPx: number | undefined, ctVal: number | 
 export function rollDay(bee: BeeState, now: number): boolean {
   const d = dayKey(now);
   if (d === bee.dayKey) return false;
+  bee.lastDayKey = bee.dayKey;
+  bee.lastDayReturnPct = bee.dayStartEquityUsd > 0 ? ((bee.equityUsd - bee.dayStartEquityUsd) / bee.dayStartEquityUsd) * 100 : 0;
   bee.dayKey = d;
   bee.dayStartEquityUsd = bee.equityUsd;
   bee.tradesToday = 0;

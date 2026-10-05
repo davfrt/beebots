@@ -13,6 +13,7 @@ import { safeError } from "../redact.js";
 const env = process.env;
 const only = env.KEYCHECK_ONLY === "live" || env.KEYCHECK_ONLY === "demo" ? env.KEYCHECK_ONLY : "";
 const minUsdc = Number(env.KEYCHECK_MIN_USDC || 0);
+const keyBees = /^(1|true|yes|on)$/i.test(env.COMPETITION_MODE ?? "") ? BEES.slice(0, 2) : BEES;
 const cli = createOkxCli({ site: "eea", timeoutMs: 10_000, maxConcurrent: 2 });
 type Row = Record<string, string>;
 let failures = 0;
@@ -45,7 +46,7 @@ try {
 }
 for (const kind of ["live", "demo"] as const) {
   if (only && kind !== only) continue;
-  for (const bee of BEES) {
+  for (const bee of keyBees) {
     const p = bee.toUpperCase();
     const infix = kind === "demo" ? "OKX_DEMO_API" : "OKX_API";
     const k = env[`${p}_${infix}_KEY`];
@@ -117,7 +118,7 @@ for (const kind of ["live", "demo"] as const) {
 
 for (const kind of ["live", "demo"]) {
   if (only && kind !== only) continue;
-  const ids = BEES.map((b) => uids.get(`${kind}:${b}`)).filter((x): x is string => !!x);
+  const ids = keyBees.map((b) => uids.get(`${kind}:${b}`)).filter((x): x is string => !!x);
   if (ids.length >= 2) {
     const distinct = new Set(ids).size === ids.length;
     if (!distinct) failures++;

@@ -28,3 +28,9 @@ export function roundToLot(contracts: number, inst: Pick<Instrument, "lotSz">): 
 export function formatSz(contracts: number, inst: Pick<Instrument, "lotSz">): string {
   return contracts.toFixed(decimals(inst.lotSz));
 }
+
+/** Round a protective trigger toward earlier execution, never away from the position's stop. */
+export function formatStopPx(px: number, closeSide: "buy" | "sell", inst: Pick<Instrument, "tickSz">): string {
+  const ticks = closeSide === "sell" ? Math.ceil(px / inst.tickSz - 1e-9) : Math.floor(px / inst.tickSz + 1e-9);
+  return (ticks * inst.tickSz).toFixed(decimals(inst.tickSz));
+}

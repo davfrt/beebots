@@ -7,7 +7,7 @@
 // After a save the engine exits and Docker restarts it with the new settings, in paper trading.
 // Each bee is designed from one sentence ("how do you want this bee to trade?"): OpenAI invents its name, rules, coins
 // and look, the engine checks the coins against OKX's live list and picks the brain it runs on, then OpenAI paints it.
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { dirname, join } from "node:path";
 import { z } from "zod";
@@ -118,8 +118,9 @@ const SetupBee = BeeSchema.extend({
 const SaveBody = z.object({
   jevKey: z.string().trim().min(8),
   openaiKey: z.string().trim().min(8).optional(),
+  useDefaults: z.boolean().default(false),
   accept: Accept,
-  bees: z.array(SetupBee).length(3),
+  bees: z.array(SetupBee).length(3).optional(),
   /** Gates the dashboard's writes (joining or leaving the Hive). Stored as a salted scrypt hash only. */
   ownerPassword: z.string().min(MIN_PASSWORD).max(MAX_PASSWORD),
   /** "Join the Hive?" step: an explicit yes or no. A yes joins on the engine's first start (hive.ts). */
@@ -299,18 +300,31 @@ export class Setup {
           return send(res, 400, { error: `Something is missing or not allowed (${what}).` });
         }
         const b = parsed.data;
-        if (!b.openaiKey && !this.o.openai.apiKey) return send(res, 400, { error: "Your bees need an OpenAI key (it designs and paints them)." });
-        const missing = BEES.filter((slot) => imagePath(this.o.settingsPath, slot) === null);
-        if (missing.length) return send(res, 400, { error: "Every bee needs its portrait before you start." });
+        if (!b.useDefaults && !b.bees) return send(res, 400, { error: "Design all three bees before you start." });
+        if (!b.useDefaults && !b.openaiKey && !this.o.openai.apiKey) return send(res, 400, { error: "Your custom bees need an OpenAI key (it designs and paints them)." });
+        if (!b.useDefaults) {
+          const missing = BEES.filter((slot) => imagePath(this.o.settingsPath, slot) === null);
+          if (missing.length) return send(res, 400, { error: "Every custom bee needs its portrait before you start." });
+        }
         const jevErr = await this.checkJev(b.jevKey, this.o.jevModel);
         if (jevErr) return send(res, 400, { error: jevErr });
         // The page's coins and style are re-checked here: coins against OKX's list (when it can be read), the style
         // against the coins.
         const known = await this.coinList().catch(() => null);
-        const bees = b.bees.map((bee) => {
-          const coins = known ? bee.coins.filter((c) => known.includes(c)) : bee.coins;
-          return { ...bee, coins, style: deriveStyle(bee.style, coins), image: true };
-        });
+        let bees: Settings["bees"];
+        if (b.useDefaults) {
+          const dir = imageDir(this.o.settingsPath);
+          mkdirSync(dir, { recursive: true });
+          bees = STYLES.map((style, i) => {
+            copyFileSync(join(this.o.refDir, `${style}.jpg`), join(dir, `${BEES[i]}.jpg`));
+            return { style, name: STYLE_INFO[style].name, tagline: STYLE_INFO[style].tagline, rules: "", coins: [], image: true };
+          });
+        } else {
+          bees = b.bees!.map((bee) => {
+            const coins = known ? bee.coins.filter((c) => known.includes(c)) : bee.coins;
+            return { ...bee, coins, style: deriveStyle(bee.style, coins), image: true };
+          });
+        }
         const s: Settings = {
           version: 1,
           jevKey: b.jevKey,

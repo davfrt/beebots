@@ -67,6 +67,7 @@ export interface Snapshot {
   risk?: { takerFeeRate: number };
   competition?: CompetitionStatus | null;
   live?: Snapshot | null;
+  keeper?: KeeperState;
 }
 
 export interface CompetitionStrategy {
@@ -108,6 +109,37 @@ export interface CompetitionStatus {
   paper: Array<{ slot: BeeName; strategy: CompetitionStrategy; startedAt: number; install?: Installation }>;
   ranking: CompetitionStrategy[];
   reason: string;
+}
+
+/** One Beekeeper round (src/keeper.ts in the engine). `bee` is the bee it was about, null when it touched nobody. */
+export interface KeeperEntry {
+  id: number;
+  /** Round start, and when it ended the way `action` says (the start while it is still running). */
+  ts: number;
+  at: number;
+  action: "calling" | "rewrote" | "quiet" | "skipped" | "refused" | "failed" | "rolled_back";
+  bee: BeeName | null;
+  quip: string;
+  idea: string | null;
+  reason: string | null;
+  anger: number | null;
+}
+
+export interface KeeperState {
+  /** false: no Zap is connected (the card shows the "Connect the Beekeeper" form). */
+  on: boolean;
+  nextRoundAt: number | null;
+  everyHours: number;
+  rounds: number;
+  rewrites: number;
+  lockedUntil: Partial<Record<BeeName, number | null>>;
+  entries: KeeperEntry[];
+}
+
+export interface KeeperEvent {
+  type: "keeper";
+  ts: number;
+  entry: KeeperEntry;
 }
 
 export interface DecisionEvent {
@@ -172,6 +204,7 @@ export type AnyEvent =
   | FillEvent
   | CapEvent
   | FundingEvent
+  | KeeperEvent
   | { type: "equity"; ts: number; bees: PublicBee[] }
   | { type: "recon"; ts: number; ok: boolean; detail: string }
   | { type: "order" | "heartbeat" | "status"; ts: number; [k: string]: unknown };

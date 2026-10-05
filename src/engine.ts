@@ -4,6 +4,8 @@ import { BRAINS } from "./bees/index.js";
 import { maxNotionalUsd, minutesSince, positionNotional, profitLockStop } from "./bees/common.js";
 import { coinOf, type Action, type BeeBrain, type BeeContext, type BeeState, type Position, type Side } from "./bees/types.js";
 import { BEES, type BeeId, type Config, type SlotProfile } from "./config.js";
+import { liveRules } from "./lab/brain.js";
+import type { Overlay } from "./lab/store.js";
 import type { Alerts } from "./alerts.js";
 import type { Db, StoredOrder } from "./db.js";
 import type { EventBus } from "./events.js";
@@ -45,6 +47,8 @@ export interface EngineDeps {
   ids?: readonly BeeId[];
   /** False when another engine sharing the same feed owns refresh scheduling. */
   manageFeed?: boolean;
+  /** The Beekeeper's rewrites (lab/store.ts). A bump of `version` rebuilds the brains on the next tick, no restart. */
+  lab?: { readonly version: number; overlay(bee: BeeId): Overlay | null };
 }
 
 interface LastDecision {
@@ -1091,7 +1095,9 @@ export class Engine {
     }
   }
 
-  private brains = {} as Record<BeeId, BeeBrain>;
+  private brains: Partial<Record<BeeId, BeeBrain>> = {};
+  private brainOverlay: Partial<Record<BeeId, number | null>> = {};
+  private brainsVersion = -1;
 
   setProfile(id: BeeId, profile: SlotProfile, restore = false): void {
     if (!this.ids.includes(id)) throw new Error(`${id} is not in this engine`);
@@ -1219,10 +1225,24 @@ export class Engine {
     this.d.alerts.send(`combined portfolio daily loss stop (${this.d.portfolioLossStopPct}%): closing live exposure`);
   }
 
-  /** The slot's style brain, narrowed to the owner's coins and carrying the owner's rules (bees/custom.ts). */
+  /**
+   * The slot's style brain, narrowed to the owner's coins and carrying the owner's rules (bees/custom.ts). While the
+   * Beekeeper has a rewrite live for the bee, its rules stand in for the owner's (lab/brain.ts).
+   */
   private brain(id: BeeId): BeeBrain {
+    const lab = this.d.lab;
+    if (lab && lab.version !== this.brainsVersion) {
+      this.brainsVersion = lab.version;
+      for (const b of BEES) {
+        const overlay = lab.overlay(b)?.id ?? null;
+        if (this.brains[b] && (this.brainOverlay[b] ?? null) === overlay) continue;
+        if (this.brains[b]) log.info("bee brain updated by the Beekeeper", { bee: b, overlay });
+        delete this.brains[b];
+        this.brainOverlay[b] = overlay;
+      }
+    }
     const s = this.d.cfg.slots[id];
-    return (this.brains[id] ??= customBrain(BRAINS[s.style], { coins: s.coins, rules: s.rules }));
+    return (this.brains[id] ??= customBrain(BRAINS[s.style], liveRules(s, lab?.overlay(id) ?? null)));
   }
 
   private knobs(id: BeeId) {

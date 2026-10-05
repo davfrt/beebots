@@ -22,6 +22,8 @@ export interface Position {
   peakPx?: number | null;
   /** breezy: ensemble score at entry, for TRIM_HALF. */
   entryScore?: number;
+  /** OKX conditional stop mirrored from stopPx (live/demo only). */
+  protection?: { algoId: string; stopPx: number; contracts: number };
 }
 
 export type CapReason = "trade_cap" | "fee_budget" | "loss_stop" | "retired";
@@ -35,6 +37,9 @@ export interface BeeState {
   uplUsd: number;
   dayKey: string;
   dayStartEquityUsd: number;
+  /** Preserved at UTC rollover so the competition can rank the complete previous day. */
+  lastDayKey?: string;
+  lastDayReturnPct?: number;
   position: Position | null;
   /** When the bee last became flat (ms), or null while positioned. */
   flatSince: number | null;

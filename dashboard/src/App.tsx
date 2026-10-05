@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { BeeColumn } from "./BeeColumn";
+import { Beekeeper } from "./Beekeeper";
 import { CompetitionCard } from "./Competition";
 import { Header } from "./Header";
 import { unlockAudio } from "./sound";
@@ -127,6 +128,7 @@ export function App() {
             <div><span className="eyebrow">Paper lab</span><strong>{visibleNames.length} challenger{visibleNames.length === 1 ? "" : "s"}</strong></div>
             <span className="dim">reset on assignment</span>
           </header>
+          <Beekeeper keeper={feed.snap?.keeper} />
           <div className="paper-bees">
           {visibleNames.map((name) => {
             const row = competition?.paper.find((candidate) => candidate.slot === name);
@@ -166,7 +168,7 @@ export function App() {
           )}
         </aside>
       </main>
-      <Toasts toasts={feed.toasts} />
+      <Toasts toasts={feed.toasts} keeper={feed.keeperToasts} />
     </div>
   );
 }
