@@ -33,6 +33,8 @@ export interface LedgerFill {
   feeUsd: number;
   ctVal: number;
   ts: number;
+  /** A reduce-only fill can only shrink a matching position, never open or flip one the books don't hold. */
+  reduceOnly?: boolean;
 }
 
 /** Apply a fill to the bee's books. Returns realised P&L (before fees). */
@@ -46,6 +48,8 @@ export function applyFill(bee: BeeState, f: LedgerFill): number {
   bee.lastOrderAt = f.ts;
   bee.totals.orders++;
 
+  // e.g. an emergency flatten closing exposure OKX held but these books did not: only the fee belongs here.
+  if (f.reduceOnly && (!p || p.instId !== f.instId || dir === (p.side === "long" ? 1 : -1))) return 0;
   if (!p) {
     bee.position = newPosition(f, dir);
     bee.flatSince = null;
@@ -74,7 +78,7 @@ export function applyFill(bee: BeeState, f: LedgerFill): number {
     bee.position = null;
     bee.flatSince = f.ts;
     const rest = f.contracts - closed;
-    if (rest > 1e-9) {
+    if (rest > 1e-9 && !f.reduceOnly) {
       bee.position = newPosition({ ...f, contracts: rest }, dir);
       bee.flatSince = null;
     }

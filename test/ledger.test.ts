@@ -46,6 +46,17 @@ describe("ledger", () => {
     expect(applyFill(b, f("buy", 50, 90))).toBeCloseTo(5, 10);
   });
 
+  it("a reduce-only fill never opens, adds to, or flips a position", () => {
+    const b = freshBee("bee3", 333, NOW);
+    expect(applyFill(b, { ...f("sell", 1, 100), reduceOnly: true })).toBe(0);
+    expect(b.position).toBeNull();
+    expect(b.cashUsd).toBeCloseTo(333 - 0.0005, 10); // the fee was still paid
+    applyFill(b, f("buy", 10, 100));
+    applyFill(b, { ...f("buy", 5, 100), reduceOnly: true });
+    applyFill(b, { ...f("sell", 15, 101), reduceOnly: true });
+    expect(b.position).toBeNull();
+  });
+
   it("adding averages the entry, trimming keeps it", () => {
     const b = freshBee("bee2", 333, NOW);
     applyFill(b, f("buy", 100, 100));

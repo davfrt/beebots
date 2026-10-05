@@ -856,7 +856,7 @@ export class Engine {
     if (!inst || !Number.isFinite(res.contracts) || !(res.contracts > 0) || !Number.isFinite(res.avgPx) || !(res.avgPx > 0) || !Number.isFinite(res.feeUsd)) return false;
     const bee = this.bees[order.bee];
     const opening = !bee.position && !order.reduceOnly;
-    const realised = applyFill(bee, { instId: order.instId, coin: inst.coin, side: order.side, contracts: res.contracts, px: res.avgPx, feeUsd: res.feeUsd, ctVal: inst.ctVal, ts: res.ts });
+    const realised = applyFill(bee, { instId: order.instId, coin: inst.coin, side: order.side, contracts: res.contracts, px: res.avgPx, feeUsd: res.feeUsd, ctVal: inst.ctVal, ts: res.ts, reduceOnly: order.reduceOnly });
     if (opening && bee.position) {
       const p = bee.position;
       p.stopPx = this.brain(order.bee).stopFor(order.instId, p.side, p.entryPx, this.ctx(order.bee, res.ts));
@@ -1132,7 +1132,7 @@ export class Engine {
     const clOrdId = `rx${ts.toString(36)}${(this.seq++ % 1296).toString(36).padStart(2, "0")}`;
     const orderId = this.d.db.insertOrder({ decisionId, bee: id, ts, clOrdId, instId: p.instId, side, contracts: p.contracts, reduceOnly: true, purpose: "exchange_reconcile" });
     this.d.db.updateOrder(orderId, "filled", fill.ordId, null);
-    const realised = applyFill(this.bees[id], { instId: p.instId, coin: p.coin, side, contracts, px, feeUsd, ctVal: inst.ctVal, ts });
+    const realised = applyFill(this.bees[id], { instId: p.instId, coin: p.coin, side, contracts, px, feeUsd, ctVal: inst.ctVal, ts, reduceOnly: true });
     this.d.db.insertFill({ orderId, bee: id, ts, instId: p.instId, side, contracts, px, notionalUsd: contracts * inst.ctVal * px, feeUsd, realisedUsd: realised });
     mark(this.bees[id], px, inst.ctVal);
     this.d.bus.emit("fill", { bee: id, coin: p.coin, side, purpose: "exchange_reconcile", contracts, px, notionalUsd: contracts * inst.ctVal * px, feeUsd, realisedUsd: realised, label: `${this.d.cfg.slots[id].name} EXCHANGE CLOSE ${p.coin}` }, ts);
