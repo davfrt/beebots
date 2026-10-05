@@ -11,8 +11,8 @@ write_status() {
 }
 
 backup() {
-  : "${BACKUP_AGE_RECIPIENT:?Set BACKUP_AGE_RECIPIENT to the off-host age public key}"
-  : "${BACKUP_SSH_TARGET:?Set BACKUP_SSH_TARGET to user@host:/absolute/path}"
+  test -n "${BACKUP_AGE_RECIPIENT:-}" || return 1
+  test -n "${BACKUP_SSH_TARGET:-}" || return 1
   case "$BACKUP_SSH_TARGET" in *[!A-Za-z0-9@._:/-]*|*:*:*|*:|:*|*//*) return 1;; esac
   retention=${BACKUP_RETENTION_DAYS:-30}
   case "$retention" in ''|*[!0-9]*) return 1;; esac
@@ -20,7 +20,8 @@ backup() {
   remote=${BACKUP_SSH_TARGET#*:}
   key=${BACKUP_SSH_KEY_PATH:-/run/secrets/backup_ssh_key}
   known=${BACKUP_SSH_KNOWN_HOSTS_PATH:-/run/secrets/backup_known_hosts}
-  test -s "$key" && test -s "$known"
+  test -s "$key" || return 1
+  test -s "$known" || return 1
   rm -rf "$work"/*
   mkdir -p "$work/recovery/databases"
   databases_before=$(find /data -maxdepth 1 -type f -name '*.sqlite' -print | sort)
