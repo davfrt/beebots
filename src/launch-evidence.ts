@@ -80,7 +80,7 @@ export function buildLaunchEvidence(input: LaunchEvidenceInput, generatedAt = ne
   });
   const outputs = REQUIRED_LAUNCH_GATES.flatMap((gate) => {
     const record = records.get(gate);
-    return record ? [`## ${gate} output\n\`\`\`text\n${redactString(record.output)}\n\`\`\``] : [];
+    return record ? [`## ${gate} output\n\`\`\`text\n${scrub(record.output)}\n\`\`\``] : [];
   });
   const markdown = [
     "# Pre-live go/no-go evidence",
@@ -88,6 +88,7 @@ export function buildLaunchEvidence(input: LaunchEvidenceInput, generatedAt = ne
     `Generated: ${generatedAt}`,
     `Release: ${cell(input.release)}`,
     `Manifest: ${cell(input.manifest)}`,
+    ...Object.entries(input.images).map(([role, image]) => `Image ${role}: ${cell(image)}`),
     `Result: **${result}**`,
     "",
     "Safety readiness does not establish profitability or prevent loss.",
@@ -105,5 +106,13 @@ export function buildLaunchEvidence(input: LaunchEvidenceInput, generatedAt = ne
 }
 
 function cell(value: string): string {
-  return redactString(value).replace(/[|\r\n]/g, " ");
+  return scrub(value).replace(/[|\r\n]/g, " ");
+}
+
+/** Release identity is evidence, not a secret: GitHub links and image digests survive redaction intact. */
+const IDENTITY = /https:\/\/github\.com\/[\w./-]+|sha256:[a-f0-9]{64}/gi;
+
+function scrub(value: string): string {
+  const kept: string[] = [];
+  return redactString(value.replace(IDENTITY, (m) => `${kept.push(m) - 1}`)).replace(/(\d+)/g, (_, i: string) => kept[Number(i)]!);
 }

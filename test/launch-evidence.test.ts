@@ -21,6 +21,18 @@ describe("launch evidence", () => {
     expect(packet.markdown).toContain("Safety readiness does not establish profitability or prevent loss.");
   });
 
+  it("keeps release identity readable while redacting secrets beside it", () => {
+    const input = complete();
+    const url = "https://github.com/acme/beebots/actions/runs/37357761109/job/111924399349";
+    input.gates[0] = { ...input.gates[0]!, reference: url, output: `${input.images.engine} token=super-secret-value` };
+    const packet = buildLaunchEvidence(input, "2026-10-04T13:00:00.000Z");
+
+    expect(packet.markdown).toContain(url);
+    expect(packet.markdown).toContain(`Image engine: ${input.images.engine}`);
+    expect(packet.markdown.split(input.images.engine).length).toBe(3);
+    expect(packet.markdown).not.toContain("super-secret-value");
+  });
+
   it("fails closed for a skipped gate and redacts supplied output", () => {
     const input = complete();
     const index = input.gates.findIndex(({ gate }) => gate === "okx-demo-minimum-open");
