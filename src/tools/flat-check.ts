@@ -8,10 +8,12 @@ import { OkxExecutor } from "../exec/executor.js";
 import { createOkxCli } from "../okx/cli.js";
 import { createPublicApi } from "../okx/public.js";
 import { safeError } from "../redact.js";
+import { loadSettings } from "../settings.js";
 
 type Row = Record<string, string>;
 const env = process.env;
-const cfg = loadConfig(env);
+// Same config the engine runs with: Setup keeps the Jev key in settings.json, not the environment.
+const cfg = loadConfig(env, loadSettings(env.SETTINGS_PATH?.trim() || "./data/settings.json"));
 const mode = cfg.mode;
 if (mode === "dry") {
   console.log("dry run: nothing is held on OKX");

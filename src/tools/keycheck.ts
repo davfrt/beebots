@@ -9,6 +9,7 @@ import { createRequire } from "node:module";
 import { BEES, type OkxCreds } from "../config.js";
 import { createOkxCli } from "../okx/cli.js";
 import { safeError } from "../redact.js";
+import { loadSettings } from "../settings.js";
 
 const env = process.env;
 const only = env.KEYCHECK_ONLY === "live" || env.KEYCHECK_ONLY === "demo" ? env.KEYCHECK_ONLY : "";
@@ -22,7 +23,9 @@ let failures = 0;
 try {
   const require = createRequire(import.meta.url);
   const { TypeSafeClient } = require("@typesafe-ai/sdk");
-  const c = new TypeSafeClient({ logLevel: "off", retry: { maxRetries: 0 }, timeout: 8000 });
+  // Setup keeps the Jev key in settings.json; the engine reads it from there too.
+  const jevKey = env.TYPESAFE_API_KEY?.trim() || loadSettings(env.SETTINGS_PATH?.trim() || "./data/settings.json")?.jevKey;
+  const c = new TypeSafeClient({ ...(jevKey ? { apiKey: jevKey } : {}), logLevel: "off", retry: { maxRetries: 0 }, timeout: 8000 });
   const models = (await c.models.list()) as Array<{ name: string }>;
   const pinned = env.JEV_MODEL || "jev-1.13.0";
   const has = models.some((m) => m.name === pinned);
