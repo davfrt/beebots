@@ -107,6 +107,7 @@ services:
 
   # Encrypts recovery data then uploads it off-host; it cannot modify the application volume.
   backup:
+    profiles: [backup]
     image: ${BACKUP_IMAGE:?Source deploy/release.env before deploying}
     restart: always
     depends_on: [engine]

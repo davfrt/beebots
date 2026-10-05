@@ -23,7 +23,6 @@ export const REQUIRED_LAUNCH_GATES = [
   "host-loss",
   "emergency-flatten",
   "rollback",
-  "restore",
   "competition-promotion",
 ] as const;
 

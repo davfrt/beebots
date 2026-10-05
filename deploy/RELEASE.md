@@ -13,14 +13,16 @@ To rehearse an upgrade, back up the `bees-data` volume, deploy the new manifest,
 
 ## Backup and restore
 
-Before starting production, set `BACKUP_AGE_RECIPIENT` to an off-host age public key, `BACKUP_SSH_TARGET` to an SSH-only account and absolute remote directory, and `BACKUP_SSH_KEY_FILE` plus `BACKUP_SSH_KNOWN_HOSTS_FILE` to local read-only files. The backup container can read application data but cannot write it; it writes only a local status volume, encrypts every `*.sqlite` database plus `settings.json`, Hive state, portraits, and the digest-pinned release manifest, verifies SQLite integrity, then atomically publishes the encrypted archive remotely. It keeps 30 days remotely by default (`BACKUP_RETENTION_DAYS`).
+Off-host backup is optional (ADR 0002: the operator accepted losing local history if the host is lost; funds and positions stay authoritative on OKX). Without it, rely on the host provider's snapshots and record that choice with the release.
+
+To enable it, add `--profile backup -f deploy/backup-compose.yml` to both commands above and, before starting, set `BACKUP_AGE_RECIPIENT` to an off-host age public key, `BACKUP_SSH_TARGET` to an SSH-only account and absolute remote directory, and `BACKUP_SSH_KEY_FILE` plus `BACKUP_SSH_KNOWN_HOSTS_FILE` to local read-only files. The backup container can read application data but cannot write it; it writes only a local status volume, encrypts every `*.sqlite` database plus `settings.json`, Hive state, portraits, and the digest-pinned release manifest, verifies SQLite integrity, then atomically publishes the encrypted archive remotely. It keeps 30 days remotely by default (`BACKUP_RETENTION_DAYS`).
 
 `/health` becomes non-green and sends one alert when the backup fails or is older than 26 hours. Preserve the latest archive name and its remote timestamp as operational evidence. The encryption identity is the recovery boundary: it is deliberately not stored on the application host, nor are live exchange credentials copied outside the encrypted archive.
 
 Restore only into an isolated empty directory and confirm the expected mode before starting an engine:
 
 ```sh
-docker compose --env-file deploy/release.env -f docker-compose.yml -f deploy/production-compose.yml run --rm \
+docker compose --env-file deploy/release.env -f docker-compose.yml -f deploy/production-compose.yml --profile backup -f deploy/backup-compose.yml run --rm \
   -v /srv/beebots-recovery:/restore-input:ro -v /srv/beebots-restore:/restore-output backup \
   restore.sh /restore-input/beebots-YYYYMMDDTHHMMSSZ.tar.gz.age /restore-input/age-identity.txt /restore-output
 ```

@@ -34,6 +34,7 @@ jobs:
       WEB_IMAGE: beebots-web:local
       BACKUP_IMAGE: beebots-backup:local
       PUBLIC_DOMAIN: :80
+      COMPOSE_PROFILES: backup
     steps:
       - uses: actions/checkout@v4
       - run: echo "source_revision=$GITHUB_SHA"

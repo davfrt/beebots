@@ -196,9 +196,8 @@ back. If you forget it, run Setup again as above. Installs from before the owner
 **Something wrong?** The engine's log says what it's doing: `docker compose logs engine`, or Hostinger Docker
 Manager → the `engine` container's logs.
 
-**Backups:** production encrypts the complete recovery set and atomically uploads it to an off-host SSH destination.
-Set the backup recipient, SSH destination, key, and known-hosts files described in [`deploy/RELEASE.md`](deploy/RELEASE.md)
-before deploying. A failed or stale backup makes `/health` non-green.
+**Backups (optional):** production can encrypt the complete recovery set and atomically upload it to an off-host SSH destination.
+Enable it as described in [`deploy/RELEASE.md`](deploy/RELEASE.md); when enabled, a failed or stale backup makes `/health` non-green.
 
 ## Real money (read this twice)
 

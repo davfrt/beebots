@@ -1,0 +1,3 @@
+# Off-host backup is optional
+
+The operator accepted the risk of losing local operational state (ledger history, P&L, settings, Hive and competition state) if the application host is lost, rather than run and pay for a second machine. Funds and positions stay authoritative on OKX (ADR 0001), API keys are re-creatable, and open exposure after host loss is flattened from OKX directly, which a backup would not speed up. The backup sidecar therefore ships as an opt-in overlay (`--profile backup -f deploy/backup-compose.yml`), the `restore` launch gate is removed, and host-provider snapshots are the default recovery path. Revisit before scaling capital or when ledger history becomes needed for reporting.

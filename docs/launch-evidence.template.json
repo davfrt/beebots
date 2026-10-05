@@ -28,7 +28,6 @@
     { "gate": "host-loss", "status": "unresolved", "reference": "", "command": "", "startedAt": "", "finishedAt": "", "output": "" },
     { "gate": "emergency-flatten", "status": "unresolved", "reference": "", "command": "", "startedAt": "", "finishedAt": "", "output": "" },
     { "gate": "rollback", "status": "unresolved", "reference": "", "command": "", "startedAt": "", "finishedAt": "", "output": "" },
-    { "gate": "restore", "status": "unresolved", "reference": "", "command": "", "startedAt": "", "finishedAt": "", "output": "" },
     { "gate": "competition-promotion", "status": "unresolved", "reference": "", "command": "", "startedAt": "", "finishedAt": "", "output": "" }
   ]
 }
