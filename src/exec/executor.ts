@@ -5,6 +5,9 @@ import type { OkxCli } from "../okx/cli.js";
 import { safeError } from "../redact.js";
 import { formatStopPx, formatSz } from "./sizing.js";
 
+/** OKX trade-function error codes (51xxx): the request was refused, so no order exists. */
+const TRADE_REFUSAL = /^51\d{3}$/;
+
 export interface OrderReq {
   instId: string;
   side: "buy" | "sell";
@@ -226,7 +229,9 @@ export class OkxExecutor implements Executor {
       }
       return { ok: false, error: { code: "UNCONFIRMED", message: "fill not confirmed; reconciliation will settle it" }, state: "unknown" };
     } catch (err) {
-      return { ok: false, error: safeError(err), state: "unknown" };
+      // The CLI exits non-zero on an OKX refusal: a 51xxx trade code means OKX answered and placed nothing.
+      const e = safeError(err);
+      return { ok: false, error: e, state: TRADE_REFUSAL.test(e.code) ? "rejected" : "unknown" };
     }
   }
 
@@ -285,7 +290,9 @@ export class OkxExecutor implements Executor {
       }
       return { ok: false, error: { code: o.state === "canceled" ? "CANCELED" : "REJECTED", message: `order ${o.state ?? "not found"}` }, state: "rejected" };
     } catch (err) {
-      log.warn("order recovery read failed", { bee, clOrdId, err: safeError(err) });
+      const e = safeError(err);
+      if (e.code === "51603") return { ok: false, error: { code: "NOT_FOUND", message: "order does not exist on OKX" }, state: "rejected" };
+      log.warn("order recovery read failed", { bee, clOrdId, err: e });
       return null;
     }
   }

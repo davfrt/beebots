@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { OkxExecutor } from "../src/exec/executor.js";
-import type { OkxCli } from "../src/okx/cli.js";
+import { OkxCliError, type OkxCli } from "../src/okx/cli.js";
 import { coin, view } from "./fixtures.js";
 
 describe("OKX native protective stops", () => {
@@ -11,6 +11,22 @@ describe("OKX native protective stops", () => {
     const exec = new OkxExecutor(cli, { bee1: { apiKey: "k", secretKey: "s", passphrase: "p" } }, false, (id) => market.instruments.get(id), 2);
 
     await expect(exec.orderByClientId("bee1", inst.instId, "partial", 2)).resolves.toMatchObject({ ok: true, state: "partial", contracts: 1 });
+  });
+
+  it("treats an OKX refusal as rejected and a network failure as unknown", async () => {
+    let fail = new OkxCliError("51169", "no position to reduce");
+    const cli: OkxCli = { async run() { throw fail; } };
+    const market = view([coin("BTC")]);
+    const inst = market.instruments.values().next().value!;
+    const exec = new OkxExecutor(cli, { bee1: { apiKey: "k", secretKey: "s", passphrase: "p" } }, false, (id) => market.instruments.get(id), 2);
+    const close = { instId: inst.instId, side: "sell" as const, contracts: 1, reduceOnly: true, clOrdId: "c1" };
+
+    await expect(exec.market("bee1", close)).resolves.toMatchObject({ ok: false, state: "rejected" });
+    fail = new OkxCliError("51603", "Order does not exist");
+    await expect(exec.orderByClientId("bee1", inst.instId, "c1", 1)).resolves.toMatchObject({ ok: false, state: "rejected", error: { code: "NOT_FOUND" } });
+    fail = new OkxCliError("CLI", "fetch failed");
+    await expect(exec.market("bee1", close)).resolves.toMatchObject({ ok: false, state: "unknown" });
+    await expect(exec.orderByClientId("bee1", inst.instId, "c1", 1)).resolves.toBeNull();
   });
 
   it("places, tightens, resizes, and cancels a reduce-only conditional stop", async () => {

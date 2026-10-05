@@ -840,7 +840,8 @@ export class Engine {
       db.updateOrder(orderId, res.state, null, `${res.error.code} ${res.error.message}`);
       bus.emit("order", { bee: id, coin: inst.coin, side, contracts, purpose, state: res.state, error: res.error });
       log.warn("order failed", { bee: id, coin: inst.coin, purpose, err: res.error });
-      if (res.state === "unknown") this.lastReconAt = 0; // reconcile on the next tick
+      // Reconcile on the next tick; a refused close usually means OKX already closed the position.
+      if (res.state === "unknown" || reduceOnly) this.lastReconAt = 0;
       if (!reduceOnly) {
         this.orderPauseUntil[id] = now + ORDER_REJECT_PAUSE_MS;
         this.d.alerts.send(`${this.d.cfg.slots[id].name}: ${inst.coin} ${purpose} order rejected (${res.error.code} ${res.error.message}); new orders paused ${ORDER_REJECT_PAUSE_MS / 60_000} min`);
@@ -1071,6 +1072,8 @@ export class Engine {
     for (const order of this.d.db.unresolvedOrders(id)) {
       const res = await this.d.exec.orderByClientId(id, order.instId, order.clOrdId, order.contracts);
       if (res === null || (!res.ok && res.state === "unknown")) return false;
+      // A just-sent order may not be visible yet: only a minute-old miss proves it never reached OKX.
+      if (!res.ok && res.error.code === "NOT_FOUND" && this.now() - order.ts < 60_000) return false;
       if (!res.ok) {
         this.d.db.updateOrder(order.id, "rejected", null, `${res.error.code} ${res.error.message}`);
         continue;
