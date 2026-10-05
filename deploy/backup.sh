@@ -37,7 +37,7 @@ backup() {
   for file in settings.json hive.json; do test ! -f "/data/$file" || cp "/data/$file" "$work/recovery/$file"; done
   test ! -f /config/release.env || cp /config/release.env "$work/recovery/release.env"
   test ! -d /data/bee-images || cp -R /data/bee-images "$work/recovery/bee-images"
-  find "$work/recovery/databases" -type f -name '*.sqlite' -exec sh -c 'printf "%s %s\\n" "$(basename "$1")" "$(sqlite3 "$1" "SELECT value FROM meta WHERE key = '\''mode'\''")"' sh {} \; > "$work/recovery/databases.txt"
+  find "$work/recovery/databases" -type f -name '*.sqlite' -exec sh -c 'printf "%s %s\\n" "$(basename "$1")" "$(sqlite3 "$1" "SELECT v FROM meta WHERE k = '\''mode'\''")"' sh {} \; > "$work/recovery/databases.txt"
   tar -C "$work/recovery" -czf "$work/recovery.tar.gz" .
   stamp=$(date -u +%Y%m%dT%H%M%SZ)
   archive="beebots-$stamp.tar.gz.age"

@@ -122,7 +122,8 @@ services:
       - backup-status:/status
       - ${BACKUP_SSH_KEY_FILE:-/dev/null}:/run/secrets/backup_ssh_key:ro
       - ${BACKUP_SSH_KNOWN_HOSTS_FILE:-/dev/null}:/run/secrets/backup_known_hosts:ro
-    tmpfs: [/work]
+      - ${BACKUP_RELEASE_MANIFEST_FILE:-./deploy/release.env.example}:/config/release.env:ro
+    tmpfs: ["/work:uid=1000,gid=1000,mode=0700"]
     networks: [backup-net]
 
 volumes:

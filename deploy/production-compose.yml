@@ -23,7 +23,7 @@ services:
       - ${BACKUP_SSH_KNOWN_HOSTS_FILE:?Set the backup SSH known-hosts file}:/run/secrets/backup_known_hosts:ro
       - ${BACKUP_RELEASE_MANIFEST_FILE:-./deploy/release.env}:/config/release.env:ro
     read_only: true
-    tmpfs: [/work]
+    tmpfs: ["/work:uid=1000,gid=1000,mode=0700"]
     networks: [backup-net]
 
 volumes:
