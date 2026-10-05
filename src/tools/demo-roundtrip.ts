@@ -38,6 +38,7 @@ const ok = (cond: boolean, msg: string) => {
 };
 
 for (const bee of BEES) {
+  await new Promise((r) => setTimeout(r, 2000)); // bees may share one demo account: stay under its rate limit
   console.log(`— ${bee}`);
   try {
     await exec.init(bee);
@@ -55,7 +56,9 @@ for (const bee of BEES) {
     ok(!guard.ok, `reduce-only while flat is rejected${guard.ok ? " (IT FILLED: STOP)" : ` (${guard.error.code})`}`);
     if (guard.ok) break;
 
-    const open = await exec.market(bee, { instId: inst.instId, side: "buy", contracts: inst.minSz, reduceOnly: false, clOrdId: cl(bee, "o") });
+    // Same IOC price bound the engine uses (executor refuses unbounded opens).
+    const limitPx = (await api.tickers()).get(inst.instId)!.ask * 1.005;
+    const open = await exec.market(bee, { instId: inst.instId, side: "buy", contracts: inst.minSz, reduceOnly: false, clOrdId: cl(bee, "o"), limitPx });
     if (!open.ok) {
       ok(false, `open failed: ${open.error.code} ${open.error.message}`);
       continue;
