@@ -32,12 +32,14 @@ describe("OKX native protective stops", () => {
     const exec = new OkxExecutor(cli, { bee1: { apiKey: "k", secretKey: "s", passphrase: "p" } }, false, (id) => market.instruments.get(id), 2);
     const placed = await exec.protect("bee1", { instId: inst.instId, closeSide: "sell", contracts: 2, triggerPx: 99.991 });
     expect(placed).toMatchObject({ ok: true, algoId: "algo-1", triggerPx: 100 });
-    expect(calls[0]).toEqual(expect.arrayContaining(["place", "--reduceOnly", "--cxlOnClosePos", "--slTriggerPx", "100.00"]));
+    expect(calls[0]).toEqual(expect.arrayContaining(["place", "--reduceOnly", "--cxlOnClosePos", "--slTriggerPx", "100.00", "--slOrdPx=-1"]));
 
     await exec.protect("bee1", { instId: inst.instId, closeSide: "sell", contracts: 3, triggerPx: 101, algoId: "algo-1" });
     expect(calls[1]).toEqual(expect.arrayContaining(["amend", "--algoId", "algo-1", "--newSz", "3", "--newSlTriggerPx", "101.00"]));
     expect(await exec.cancelProtection("bee1", inst.instId, "algo-1")).toBe(true);
     expect(calls[2]).toEqual(expect.arrayContaining(["cancel", "--algoId", "algo-1"]));
+    // The OKX CLI (node parseArgs) rejects a separate argument like "-1" as ambiguous: negatives must use --opt=-1.
+    expect(calls.flat().filter((arg) => /^-\d/.test(arg))).toEqual([]);
     await expect(exec.externalClose("bee1", inst.instId, "sell", 500, 2, new Set(["old-trim"]))).resolves.toEqual({ ordId: "stop-order", avgPx: 99, feeUsd: 0.1, ts: 1000 });
     await expect(exec.protectionMatches("bee1", { instId: inst.instId, closeSide: "sell", contracts: 2, triggerPx: 100, algoId: "algo-1" })).resolves.toBe(true);
     await expect(exec.protectionMatches("bee1", { instId: inst.instId, closeSide: "sell", contracts: 3, triggerPx: 100, algoId: "algo-1" })).resolves.toBe(false);

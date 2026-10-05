@@ -298,14 +298,14 @@ export class OkxExecutor implements Executor {
       if (req.algoId) {
         const [ack] = await this.run<Row[]>(bee, [
           "futures", "algo", "amend", "--instId", req.instId, "--algoId", req.algoId,
-          "--newSz", formatSz(req.contracts, inst), "--newSlTriggerPx", trigger, "--newSlOrdPx", "-1",
+          "--newSz", formatSz(req.contracts, inst), "--newSlTriggerPx", trigger, "--newSlOrdPx=-1", // "=" form: the CLI parses a bare "-1" as an option
         ]);
         if (!ack || (ack.sCode && ack.sCode !== "0")) return { ok: false, error: { code: ack?.sCode ?? "NOACK", message: ack?.sMsg ?? "no protection amend ack" } };
         return { ok: true, algoId: req.algoId, triggerPx: Number(trigger) };
       }
       const [ack] = await this.run<Row[]>(bee, [
         "futures", "algo", "place", "--instId", req.instId, "--side", req.closeSide, "--sz", formatSz(req.contracts, inst),
-        "--ordType", "conditional", "--slTriggerPx", trigger, "--slOrdPx", "-1", "--slTriggerPxType", "mark",
+        "--ordType", "conditional", "--slTriggerPx", trigger, "--slOrdPx=-1", "--slTriggerPxType", "mark",
         "--posSide", "net", "--tdMode", "isolated", "--reduceOnly", "--cxlOnClosePos",
       ]);
       if (!ack || (ack.sCode && ack.sCode !== "0") || !ack.algoId) return { ok: false, error: { code: ack?.sCode ?? "NOACK", message: ack?.sMsg ?? "no protection algo id" } };
