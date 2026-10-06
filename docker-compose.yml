@@ -31,6 +31,8 @@ services:
       PORTFOLIO_DAILY_LOSS_PCT: ${PORTFOLIO_DAILY_LOSS_PCT:-1}
       BEE_START_EQUITY_USD: ${BEE_START_EQUITY_USD:-333}
       ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      # External dead-man monitor (e.g. a healthchecks.io ping URL): it alerts when these reports stop. Required live.
+      DEAD_MAN_URL: ${DEAD_MAN_URL:-}
       # Setup stays open this many minutes after the engine starts; after that, restart the engine to open it again.
       SETUP_WINDOW_MIN: ${SETUP_WINDOW_MIN:-120}
       # Only if your Setup file has no owner password (older installs, or keys set only here): gates the dashboard's

@@ -31,6 +31,26 @@ describe("live safety health", () => {
     engine.stop();
   });
 
+  it("reports to the dead-man monitor unless a competition paper engine could mask live", async () => {
+    const market = view([coin("ENA")]);
+    const feed = { view: () => market, refresh: async () => {}, refreshTickers: async () => {}, lastRefreshAt: NOW } as unknown as MarketFeed;
+    const beats = async (env: Record<string, string>) => {
+      const cfg = testConfig({ DRY_RUN: "true", ...env });
+      const db = new Db(":memory:");
+      let n = 0;
+      const alerts = new Alerts(undefined, "https://monitor.test/ping");
+      alerts.heartbeat = async () => (n++, true);
+      const engine = new Engine({ cfg, db, feed, exec: new SimExecutor(() => market, 0), bus: new EventBus(db), alerts, jev: new Jev({ ...cfg.jev, client: { async systemOne() { throw new Error("unused"); } }, now: () => NOW }), now: () => NOW });
+      await engine.start();
+      await engine.tick();
+      engine.stop();
+      return n;
+    };
+
+    expect(await beats({})).toBeGreaterThan(0);
+    expect(await beats({ COMPETITION_MODE: "true" })).toBe(0);
+  });
+
   it("fails competition health when live is unsafe despite healthy paper", () => {
     const paper = { ok: true, reasons: [], release: "test", mode: "dry" as const, closed: false, flat: true, marketAgeMs: 0, safetyAgeMs: 0, reconciliationAgeMs: null, exchangeReadAgeMs: null, uptimeS: 1 };
     const live = { ...paper, ok: false, reasons: ["exchange reads stale"], mode: "live" as const };

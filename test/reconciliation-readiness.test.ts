@@ -72,7 +72,7 @@ describe("exchange reconciliation readiness", () => {
       return { ok: true, ordId: "close", contracts: 1, avgPx: 100, feeUsd: 0, ts: NOW, state: "partial" };
     };
     const db = new Db(path);
-    const engine = new Engine({ cfg, db, feed, jev: new Jev({ ...cfg.jev, client: openingJev(), now: () => NOW }), exec, bus: new EventBus(db), alerts: { send() {} } as unknown as Alerts, now: () => NOW, ids: ["bee1"], closeRequested: () => true });
+    const engine = new Engine({ cfg, db, feed, jev: new Jev({ ...cfg.jev, client: openingJev(), now: () => NOW }), exec, bus: new EventBus(db), alerts: new Alerts(undefined), now: () => NOW, ids: ["bee1"], closeRequested: () => true });
 
     await engine.start();
     await engine.tick();
@@ -102,7 +102,7 @@ describe("exchange reconciliation readiness", () => {
     const exec = fakeExchange(() => [{ instId: "ENA-USD_UM_XPERP-310404", pos: 2, avgPx: 100 }], []);
     exec.orderByClientId = async () => ({ ok: true, ordId: "order-1", contracts: 2, avgPx: 100, feeUsd: 0.2, ts: NOW });
     exec.accountEquity = async () => 332.8;
-    const engine = new Engine({ cfg, db, feed, jev: new Jev({ ...cfg.jev, client: openingJev(), now: () => NOW }), exec, bus: new EventBus(db), alerts: { send() {} } as unknown as Alerts, now: () => NOW, ids: ["bee1"] });
+    const engine = new Engine({ cfg, db, feed, jev: new Jev({ ...cfg.jev, client: openingJev(), now: () => NOW }), exec, bus: new EventBus(db), alerts: new Alerts(undefined), now: () => NOW, ids: ["bee1"] });
 
     await engine.start();
     await engine.reconcile();
@@ -124,7 +124,7 @@ describe("exchange reconciliation readiness", () => {
     const exec = fakeExchange(() => [{ instId: "ENA-USD_UM_XPERP-310404", pos: 1, avgPx: 100 }], []);
     exec.orderByClientId = async () => ({ ok: true, state: "partial", ordId: "order-partial", contracts: 1, avgPx: 100, feeUsd: 0.1, ts: NOW });
     exec.accountEquity = async () => 332.9;
-    const engine = new Engine({ cfg, db, feed, jev: new Jev({ ...cfg.jev, client: openingJev(), now: () => NOW }), exec, bus: new EventBus(db), alerts: { send() {} } as unknown as Alerts, now: () => NOW, ids: ["bee1"] });
+    const engine = new Engine({ cfg, db, feed, jev: new Jev({ ...cfg.jev, client: openingJev(), now: () => NOW }), exec, bus: new EventBus(db), alerts: new Alerts(undefined), now: () => NOW, ids: ["bee1"] });
 
     await engine.start();
     engine.stop();
@@ -146,14 +146,14 @@ describe("exchange reconciliation readiness", () => {
       const exec = fakeExchange(() => [{ instId: "ENA-USD_UM_XPERP-310404", pos: 2, avgPx: 100 }], []);
       exec.orderByClientId = async () => ({ ok: true, ordId: "order-2", contracts: 2, avgPx: 100, feeUsd: 0.2, ts: NOW });
       exec.accountEquity = async () => 332.8;
-      const first = new Engine({ cfg, db, feed, jev: new Jev({ ...cfg.jev, client: openingJev(), now: () => now }), exec, bus: new EventBus(db), alerts: { send() {} } as unknown as Alerts, now: () => now, ids: ["bee1"] });
+      const first = new Engine({ cfg, db, feed, jev: new Jev({ ...cfg.jev, client: openingJev(), now: () => now }), exec, bus: new EventBus(db), alerts: new Alerts(undefined), now: () => now, ids: ["bee1"] });
       await first.start();
       first.stop();
       db.close();
 
       now++;
       const restarted = new Db(path);
-      const second = new Engine({ cfg, db: restarted, feed, jev: new Jev({ ...cfg.jev, client: openingJev(), now: () => now }), exec, bus: new EventBus(restarted), alerts: { send() {} } as unknown as Alerts, now: () => now, ids: ["bee1"] });
+      const second = new Engine({ cfg, db: restarted, feed, jev: new Jev({ ...cfg.jev, client: openingJev(), now: () => now }), exec, bus: new EventBus(restarted), alerts: new Alerts(undefined), now: () => now, ids: ["bee1"] });
       await second.start();
       second.stop();
       expect(restarted.raw.prepare("SELECT COUNT(*) AS n FROM fills WHERE order_id = ?").get(orderId)).toEqual({ n: 1 });
@@ -166,7 +166,7 @@ describe("exchange reconciliation readiness", () => {
     const feed = { view: () => market, refresh: async () => {}, refreshTickers: async () => {}, lastRefreshAt: NOW } as unknown as MarketFeed;
     let exchangePositions: ExchangePosition[] | null = null;
     const sent: string[] = [];
-    const engine = new Engine({ cfg, db: new Db(":memory:"), feed, jev: new Jev({ ...cfg.jev, client: openingJev(), now: () => NOW }), exec: fakeExchange(() => exchangePositions, sent), bus: new EventBus(new Db(":memory:")), alerts: { send() {} } as unknown as Alerts, now: () => NOW });
+    const engine = new Engine({ cfg, db: new Db(":memory:"), feed, jev: new Jev({ ...cfg.jev, client: openingJev(), now: () => NOW }), exec: fakeExchange(() => exchangePositions, sent), bus: new EventBus(new Db(":memory:")), alerts: new Alerts(undefined), now: () => NOW });
     await engine.start();
     engine.stop();
     engine.bees.bee1.cap = "trade_cap";
@@ -188,7 +188,7 @@ describe("exchange reconciliation readiness", () => {
     const cfg = testConfig({ DRY_RUN: "true" });
     const market = view([coin("ENA"), coin("SUI")]);
     const feed = { view: () => market, refresh: async () => {}, refreshTickers: async () => {}, lastRefreshAt: NOW } as unknown as MarketFeed;
-    const engine = new Engine({ cfg, db: new Db(":memory:"), feed, jev: new Jev({ ...cfg.jev, client: openingJev(), now: () => NOW }), exec: fakeExchange(() => [{ instId: "ENA-USD_UM_XPERP-310404", pos: 1, avgPx: 100 }, { instId: "SUI-USD_UM_XPERP-310404", pos: 1, avgPx: 100 }], []), bus: new EventBus(new Db(":memory:")), alerts: { send() {} } as unknown as Alerts, now: () => NOW });
+    const engine = new Engine({ cfg, db: new Db(":memory:"), feed, jev: new Jev({ ...cfg.jev, client: openingJev(), now: () => NOW }), exec: fakeExchange(() => [{ instId: "ENA-USD_UM_XPERP-310404", pos: 1, avgPx: 100 }, { instId: "SUI-USD_UM_XPERP-310404", pos: 1, avgPx: 100 }], []), bus: new EventBus(new Db(":memory:")), alerts: new Alerts(undefined), now: () => NOW });
     await engine.start();
     engine.stop();
 
@@ -204,7 +204,7 @@ describe("exchange reconciliation readiness", () => {
     bee.position = { instId: "ENA-USD_UM_XPERP-310404", coin: "ENA", side: "long", contracts: 10, entryPx: 100, openedAt: NOW - 1_000, stopPx: 90, riskUsd: 10 };
     bee.flatSince = null;
     db.saveBee(bee, NOW);
-    const engine = new Engine({ cfg, db, feed, jev: new Jev({ ...cfg.jev, client: openingJev(), now: () => NOW }), exec: fakeExchange(() => [{ instId: bee.position!.instId, pos: 5, avgPx: 101 }], [], { ordId: "external-close", avgPx: 101, feeUsd: 0.5, ts: NOW }), bus: new EventBus(db), alerts: { send() {} } as unknown as Alerts, now: () => NOW, ids: ["bee1"] });
+    const engine = new Engine({ cfg, db, feed, jev: new Jev({ ...cfg.jev, client: openingJev(), now: () => NOW }), exec: fakeExchange(() => [{ instId: bee.position!.instId, pos: 5, avgPx: 101 }], [], { ordId: "external-close", avgPx: 101, feeUsd: 0.5, ts: NOW }), bus: new EventBus(db), alerts: new Alerts(undefined), now: () => NOW, ids: ["bee1"] });
     await engine.start();
     engine.stop();
 
@@ -223,7 +223,7 @@ describe("exchange reconciliation readiness", () => {
     const exec = fakeExchange(() => [], []);
     exec.fundingBills = async (_bee, after) => pages.get(after ?? "start") ?? null;
     exec.accountEquity = async () => 434;
-    const engine = new Engine({ cfg, db, feed, jev: new Jev({ ...cfg.jev, client: openingJev(), now: () => NOW }), exec, bus: new EventBus(db), alerts: { send() {} } as unknown as Alerts, now: () => NOW, ids: ["bee1"] });
+    const engine = new Engine({ cfg, db, feed, jev: new Jev({ ...cfg.jev, client: openingJev(), now: () => NOW }), exec, bus: new EventBus(db), alerts: new Alerts(undefined), now: () => NOW, ids: ["bee1"] });
     await engine.start();
     engine.stop();
 
@@ -239,7 +239,7 @@ describe("exchange reconciliation readiness", () => {
     db.setMeta("funding_cursor_bee1", "missing-bill");
     const exec = fakeExchange(() => [], []);
     exec.fundingBills = async () => [];
-    const engine = new Engine({ cfg, db, feed, jev: new Jev({ ...cfg.jev, client: openingJev(), now: () => NOW }), exec, bus: new EventBus(db), alerts: { send() {} } as unknown as Alerts, now: () => NOW, ids: ["bee1"] });
+    const engine = new Engine({ cfg, db, feed, jev: new Jev({ ...cfg.jev, client: openingJev(), now: () => NOW }), exec, bus: new EventBus(db), alerts: new Alerts(undefined), now: () => NOW, ids: ["bee1"] });
     await engine.start();
     engine.stop();
 
