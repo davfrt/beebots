@@ -6,7 +6,7 @@ import { Header } from "./Header";
 import { unlockAudio } from "./sound";
 import { Ticker } from "./Ticker";
 import { Toasts } from "./Toasts";
-import { BEE_META, BEE_NAMES, type BeeMeta, type BeeName, type CompetitionStrategy, type Installation, type PublicBee } from "./types";
+import { BEE_META, BEE_NAMES, STYLE_LABEL, type BeeMeta, type BeeName, type CompetitionStatus, type CompetitionStrategy, type Installation, type PublicBee } from "./types";
 import { type Curve, useFeed } from "./useFeed";
 
 const r2 = (n: number) => Number(n.toFixed(2));
@@ -88,7 +88,7 @@ export function App() {
     title: strategy.name,
     short: strategy.name,
     tagline: strategy.tagline,
-    styleLabel: strategy.style,
+    styleLabel: STYLE_LABEL[strategy.style],
     rules: strategy.rules,
     coins: strategy.coins,
     img: `/bee-image/${strategy.fingerprint}`,
@@ -122,7 +122,7 @@ export function App() {
             variant="champion"
             installedAt={liveInstall?.installedAt}
           />
-        ) : <section className="champion-empty"><span className="eyebrow">Live champion</span><strong>Collecting the first Hive winner</strong></section>}
+        ) : <ChampionWaiting state={competition} />}
         <aside className="paper-lab">
           <header className="paper-lab-head">
             <div><span className="eyebrow">Paper lab</span><strong>{visibleNames.length} challenger{visibleNames.length === 1 ? "" : "s"}</strong></div>
@@ -170,5 +170,26 @@ export function App() {
       </main>
       <Toasts toasts={feed.toasts} keeper={feed.keeperToasts} />
     </div>
+  );
+}
+
+/** No live champion yet: show the strategy leading the Hive and what still stands between it and real money. */
+function ChampionWaiting({ state }: { state: CompetitionStatus | null | undefined }) {
+  const leader = state?.ranking[0] ?? state?.paper[0]?.strategy;
+  if (!state || !leader) return <section className="champion-empty"><span className="eyebrow">Live champion</span><strong>Collecting the first Hive winner</strong></section>;
+  const next = new Date(state.nextSelectionAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
+  return (
+    <section className="champion-empty champion-waiting">
+      <span className="eyebrow">Leading the Hive · not live</span>
+      <strong>{leader.name}</strong>
+      <div className="waiting-tag">
+        {leader.tagline && `${leader.tagline} · `}{STYLE_LABEL[leader.style]}{leader.coins.length > 0 && ` · ${leader.coins.join(" ")}`}
+        {" · "}<span className={leader.returnPct >= 0 ? "good num" : "bad num"}>{leader.returnPct >= 0 ? "+" : ""}{leader.returnPct.toFixed(2)}%</span> on the Hive
+      </div>
+      {leader.rules && <p className="waiting-rules">{leader.rules}</p>}
+      <p className="dim">
+        {state.liveEnabled ? `Not live yet: ${state.reason}.` : "Paper only: real money needs live mode and your approval of a champion."} Next selection {next} UTC.
+      </p>
+    </section>
   );
 }

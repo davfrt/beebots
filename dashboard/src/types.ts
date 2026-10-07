@@ -223,6 +223,8 @@ export interface BeeMeta {
   glow: string;
 }
 
+export const STYLE_LABEL: Record<CompetitionStrategy["style"], string> = { bizzy: "Breakout", breezy: "Trend", boozy: "Momentum" };
+
 /** Colours belong to the slot, so two bees on the same style still look different. Filled in from /profile at load. */
 export const BEE_META: Record<BeeName, BeeMeta> = {
   bee1: { title: "Bizzy Bee", short: "Bizzy", tagline: "the grinder", styleLabel: "Breakout", rules: "", coins: [], img: "/bees/bizzy.jpg", color: "var(--bizzy)", glow: "var(--bizzy-glow)" },

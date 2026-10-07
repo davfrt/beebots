@@ -11,7 +11,9 @@ export function CompetitionCard({ state, live, decisions = [], events = [] }: { 
         <span className="eyebrow">Daily competition</span>
         <span className="dim">next {next} UTC</span>
       </div>
-      {state.champion ? <p className="competition-result"><strong>{state.champion.name}</strong> won selection at <span className={state.champion.returnPct >= 0 ? "good num" : "bad num"}>{pct(state.champion.returnPct)}</span></p> : <p className="dim competition-empty">Collecting the first Hive snapshot.</p>}
+      {state.champion ? <p className="competition-result"><strong>{state.champion.name}</strong> won selection at <span className={state.champion.returnPct >= 0 ? "good num" : "bad num"}>{pct(state.champion.returnPct)}</span></p>
+        : state.ranking[0] ? <p className="competition-result"><strong>{state.ranking[0].name}</strong> leads the Hive at <span className={state.ranking[0].returnPct >= 0 ? "good num" : "bad num"}>{pct(state.ranking[0].returnPct)}</span></p>
+        : <p className="dim competition-empty">Collecting the first Hive snapshot.</p>}
       <div className="competition-note">{state.liveEnabled ? "LIVE · two isolated slots" : "PAPER · live keys disabled"} · {state.reason}</div>
       {live && (
         <div className="competition-live">

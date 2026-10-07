@@ -90,6 +90,12 @@ export function BeeColumn({ name, bee, curve, baseline, rank, gap, flash, identi
               {meta.rules}
             </div>
           )}
+          {/* Compact cards preview the strategy in three lines; a tap opens the whole of it. */}
+          {meta.rules && compact && (
+            <details className="bee-rules">
+              <summary>{meta.rules}</summary>
+            </details>
+          )}
         </div>
         <div className="rank">
           <div className="rank-n">{badge ?? `#${rank}`}</div>

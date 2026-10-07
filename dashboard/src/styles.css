@@ -69,7 +69,7 @@ body,
   color: var(--critical-text);
 }
 .eyebrow {
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -112,7 +112,7 @@ body,
 }
 .mode {
   font-weight: 700;
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   letter-spacing: 0.1em;
   padding: 0.2rem 0.55rem;
   border-radius: 999px;
@@ -120,7 +120,7 @@ body,
 }
 .update-pill {
   font-weight: 700;
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   letter-spacing: 0.04em;
   padding: 0.2rem 0.55rem;
   border-radius: 999px;
@@ -185,7 +185,7 @@ a.counter.host:hover {
   margin-top: 0.1rem;
 }
 .counter-sub {
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   color: var(--muted);
 }
 .top-right {
@@ -359,7 +359,7 @@ a.counter.host:hover {
 .modal-label {
   display: block;
   margin-top: 0.9rem;
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -449,7 +449,7 @@ a.counter.host:hover {
   justify-content: space-between;
   gap: 1rem;
   padding: 0 0.15rem;
-  font-size: 0.72rem;
+  font-size: 0.8rem;
 }
 .paper-lab-head > div {
   display: grid;
@@ -563,7 +563,7 @@ a.counter.host:hover {
 }
 .compact .bee-tag,
 .compact .bee-style {
-  font-size: 0.64rem;
+  font-size: 0.8rem;
 }
 .compact .rank-n {
   font-size: 1.15rem;
@@ -588,7 +588,7 @@ a.counter.host:hover {
   font-size: 0.8rem;
 }
 .compact .since {
-  font-size: 0.6rem;
+  font-size: 0.8rem;
 }
 .compact .position {
   padding: 0.42rem 0.55rem;
@@ -643,11 +643,11 @@ a.counter.host:hover {
 }
 .bee-style {
   color: var(--muted);
-  font-size: 0.75rem;
+  font-size: 0.85rem;
 }
 .bee-rules {
-  font-size: 0.72rem;
-  color: var(--muted);
+  font-size: 0.85rem;
+  color: var(--text-2);
   line-height: 1.35;
   overflow-wrap: anywhere;
   margin-top: 0.1rem;
@@ -661,7 +661,7 @@ a.counter.host:hover {
   line-height: 1;
 }
 .rank-gap {
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   color: var(--muted);
   margin-top: 0.2rem;
 }
@@ -723,7 +723,7 @@ a.counter.host:hover {
   font-size: 0.95rem;
 }
 .pos-px {
-  font-size: 0.75rem;
+  font-size: 0.85rem;
 }
 
 .chart {
@@ -781,7 +781,7 @@ a.counter.host:hover {
   font-variant-numeric: tabular-nums;
 }
 .tt-sub {
-  font-size: 0.7rem;
+  font-size: 0.8rem;
   color: var(--muted);
 }
 
@@ -793,7 +793,7 @@ a.counter.host:hover {
 .last-head {
   display: flex;
   justify-content: space-between;
-  font-size: 0.75rem;
+  font-size: 0.85rem;
 }
 .status {
   font-size: 0.8rem;
@@ -864,7 +864,7 @@ a.counter.host:hover {
 .meter-head {
   display: flex;
   justify-content: space-between;
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   color: var(--muted);
   margin-bottom: 0.3rem;
 }
@@ -995,7 +995,7 @@ a.counter.host:hover {
 }
 .since {
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   align-self: end;
 }
 
@@ -1032,7 +1032,7 @@ a.counter.host:hover {
 .competition-strategy {
   margin: 0.65rem 0 0;
   color: var(--text-2);
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
@@ -1045,7 +1045,7 @@ a.counter.host:hover {
   display: grid;
   grid-template-columns: 1rem 1fr auto;
   gap: 0.45rem;
-  font-size: 0.78rem;
+  font-size: 0.85rem;
 }
 .competition-runners .num {
   color: var(--bizzy);
@@ -1061,7 +1061,7 @@ a.counter.host:hover {
 }
 .competition-result {
   margin: 0;
-  font-size: 0.78rem;
+  font-size: 0.85rem;
   line-height: 1.4;
 }
 .competition-live {
@@ -1071,7 +1071,7 @@ a.counter.host:hover {
   margin-top: 0.55rem;
   padding-top: 0.5rem;
   border-top: 1px solid var(--line);
-  font-size: 0.7rem;
+  font-size: 0.8rem;
 }
 .competition-problem {
   color: var(--critical-text);
@@ -1129,7 +1129,7 @@ a.counter.host:hover {
 .tick-meta {
   display: flex;
   gap: 0.5rem;
-  font-size: 0.78rem;
+  font-size: 0.85rem;
 }
 .tick-bars {
   display: grid;
@@ -1165,7 +1165,7 @@ a.counter.host:hover {
   text-shadow: 0 0 3px rgba(0, 0, 0, 0.9);
 }
 .tick-note {
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   margin-top: 0.25rem;
   color: var(--text-2);
 }
@@ -1508,10 +1508,10 @@ a.counter.host:hover {
   align-items: baseline;
   gap: 0.6rem;
   margin-top: 0.3rem;
-  font-size: 0.75rem;
+  font-size: 0.85rem;
 }
 .tick-pulse .side {
-  font-size: 0.75rem;
+  font-size: 0.85rem;
 }
 .tick-delta {
   font-weight: 800;
@@ -1581,7 +1581,7 @@ a.counter.host:hover {
   font-size: 0.9em;
 }
 .setup .small {
-  font-size: 13px;
+  font-size: 14px;
 }
 .setup-head {
   display: flex;
@@ -1599,7 +1599,7 @@ a.counter.host:hover {
   flex-wrap: wrap;
 }
 .setup-steps li {
-  font-size: 12px;
+  font-size: 14px;
   padding: 4px 10px;
   border-radius: 999px;
   background: var(--card-2);
@@ -1685,7 +1685,7 @@ textarea.setup-input {
   color: var(--muted);
   padding: 0;
   font-weight: 400;
-  font-size: 13px;
+  font-size: 14px;
   text-decoration: underline;
 }
 .setup-actions {
@@ -1702,7 +1702,7 @@ textarea.setup-input {
 .setup-row button {
   flex: 1;
   padding: 8px 10px;
-  font-size: 13px;
+  font-size: 14px;
 }
 .setup-ok {
   color: var(--good-text) !important;
@@ -1763,7 +1763,7 @@ textarea.setup-input {
   font-size: 14px;
 }
 .setup-label {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
   color: var(--text);
   margin-top: 4px;
@@ -1797,7 +1797,7 @@ textarea.setup-input {
 }
 .coin-chip {
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
   padding: 2px 8px;
   border-radius: 999px;
@@ -1812,7 +1812,7 @@ textarea.setup-input {
   font-weight: 600;
 }
 .setup p.setup-rules {
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.45;
   color: var(--text);
   background: rgba(255, 255, 255, 0.03);
@@ -1833,7 +1833,7 @@ textarea.setup-input {
 .setup .chip {
   flex: 1;
   padding: 6px 8px;
-  font-size: 13px;
+  font-size: 14px;
   background: transparent;
   color: var(--text-2);
   border: 1px solid var(--line);
@@ -1905,14 +1905,14 @@ textarea.setup-input {
   font-size: 0.95rem;
 }
 .keeper-sub {
-  font-size: 0.72rem;
+  font-size: 0.8rem;
 }
 .keeper-next {
   margin-left: auto;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   white-space: nowrap;
 }
 .keeper-next b {
@@ -1945,7 +1945,7 @@ textarea.setup-input {
   justify-content: space-between;
   gap: 0.6rem;
   margin-top: 0.35rem;
-  font-size: 0.78rem;
+  font-size: 0.85rem;
 }
 .keeper-meta > .num,
 .keeper-meta > .dim {
@@ -2020,7 +2020,7 @@ textarea.setup-input {
   font-weight: 600;
 }
 .keeper-row-ago {
-  font-size: 0.7rem;
+  font-size: 0.8rem;
 }
 .keeper-empty {
   padding: 0.6rem 0;
@@ -2124,7 +2124,7 @@ textarea.setup-input {
 }
 .keeper-label {
   margin-top: 0.2rem;
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -2212,4 +2212,36 @@ textarea.setup-input {
 .keeper-undo {
   margin-left: 0.5rem;
   color: #ff9a66;
+}
+
+/* Compact cards: three-line strategy preview, tap to read all of it. */
+.compact details.bee-rules summary {
+  cursor: pointer;
+  list-style: none;
+}
+.compact details.bee-rules summary::-webkit-details-marker {
+  display: none;
+}
+.compact details.bee-rules:not([open]) summary {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+/* No live champion yet: the Hive leader and its strategy. */
+.champion-waiting {
+  padding: 2rem;
+  max-width: 100%;
+}
+.champion-waiting .waiting-tag {
+  font-size: 1.05rem;
+  color: var(--text-2);
+}
+.champion-waiting .waiting-rules {
+  max-width: 52rem;
+  margin: 0 auto;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--text);
+  overflow-wrap: anywhere;
 }
