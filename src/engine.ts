@@ -281,8 +281,7 @@ export class Engine {
       this.checkJevOutage(now);
       if (tickersFresh && !safetyFailed) {
         this.lastSafetyAt = now;
-        // In competition only the live engine reports, so a healthy paper engine cannot hide a dead live one.
-        if (this.d.cfg.mode === "live" || !this.d.cfg.competition.enabled) void this.d.alerts.heartbeat(now);
+        void this.d.alerts.heartbeat(now);
       }
     } finally {
       this.ticking = false;

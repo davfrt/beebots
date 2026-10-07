@@ -1,9 +1,9 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Alerts } from "../src/alerts.js";
-import { aggregateCompetitionHealth } from "../src/competition-app.js";
+import { aggregateCompetitionHealth, paperAlerts } from "../src/competition-app.js";
 import { Db } from "../src/db.js";
 import { Engine } from "../src/engine.js";
 import { EventBus } from "../src/events.js";
@@ -31,24 +31,26 @@ describe("live safety health", () => {
     engine.stop();
   });
 
-  it("reports to the dead-man monitor unless a competition paper engine could mask live", async () => {
+  it("reports to the dead-man monitor after a safe tick, and competition paper only while no live engine runs", async () => {
     const market = view([coin("ENA")]);
     const feed = { view: () => market, refresh: async () => {}, refreshTickers: async () => {}, lastRefreshAt: NOW } as unknown as MarketFeed;
-    const beats = async (env: Record<string, string>) => {
-      const cfg = testConfig({ DRY_RUN: "true", ...env });
-      const db = new Db(":memory:");
-      let n = 0;
-      const alerts = new Alerts(undefined, "https://monitor.test/ping");
-      alerts.heartbeat = async () => (n++, true);
-      const engine = new Engine({ cfg, db, feed, exec: new SimExecutor(() => market, 0), bus: new EventBus(db), alerts, jev: new Jev({ ...cfg.jev, client: { async systemOne() { throw new Error("unused"); } }, now: () => NOW }), now: () => NOW });
-      await engine.start();
-      await engine.tick();
-      engine.stop();
-      return n;
-    };
+    const cfg = testConfig({ DRY_RUN: "true" });
+    const db = new Db(":memory:");
+    let n = 0;
+    const alerts = new Alerts(undefined, "https://monitor.test/ping");
+    alerts.heartbeat = async () => (n++, true);
+    const engine = new Engine({ cfg, db, feed, exec: new SimExecutor(() => market, 0), bus: new EventBus(db), alerts, jev: new Jev({ ...cfg.jev, client: { async systemOne() { throw new Error("unused"); } }, now: () => NOW }), now: () => NOW });
+    await engine.start();
+    await engine.tick();
+    engine.stop();
+    expect(n).toBeGreaterThan(0);
 
-    expect(await beats({})).toBeGreaterThan(0);
-    expect(await beats({ COMPETITION_MODE: "true" })).toBe(0);
+    expect(paperAlerts(cfg, alerts)).toBe(alerts);
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    await expect(paperAlerts({ ...cfg, mode: "live" }, alerts).heartbeat(NOW)).resolves.toBe(false);
+    expect(fetch).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
   });
 
   it("fails competition health when live is unsafe despite healthy paper", () => {

@@ -30,6 +30,11 @@ export function aggregateCompetitionHealth(paper: ReturnType<Engine["health"]>, 
   return { ...paper, ok: paper.ok && (live?.ok ?? true), reasons: [...paper.reasons, ...(live?.reasons ?? [])], live };
 }
 
+/** Paper reports to the dead-man monitor only while no live engine runs, so healthy paper cannot hide a dead live one. */
+export function paperAlerts(cfg: Config, alerts: Alerts): Alerts {
+  return cfg.mode === "live" ? new Alerts(cfg.alertWebhookUrl) : alerts;
+}
+
 function publicProfile(cfg: Config) {
   return {
     setup: false,
@@ -70,7 +75,7 @@ export async function runCompetitionApp(cfg: Config): Promise<void> {
 
   const closeDir = dirname(cfg.dbPath);
   const paper = new Engine({
-    cfg: paperCfg, db: paperDb, feed, jev, exec: new SimExecutor(() => feed.view(), cfg.risk.takerFeeRate), bus, alerts, ids: BEES,
+    cfg: paperCfg, db: paperDb, feed, jev, exec: new SimExecutor(() => feed.view(), cfg.risk.takerFeeRate), bus, alerts: paperAlerts(cfg, alerts), ids: BEES,
     entriesAllowed: (id) => runtime.manager?.paperEntriesAllowed(id) ?? false,
     closeRequested: () => existsSync(join(closeDir, "close-dry")),
   });
