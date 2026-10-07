@@ -46,6 +46,7 @@ describe("competition observer", () => {
       bee({ id: "bad-retired", retired: true }),
       bee({ id: "bad-rules", instructions: null }),
       bee({ id: "bad-trades", trades: 1 }),
+      bee({ id: "bad-oversized", instructions: "x".repeat(601) }),
     ];
     const c = new Competition({ db, url: "https://hive.test", now: () => END, fetch: async () => response(bees) });
     expect(await c.ingest()).toBe(1);

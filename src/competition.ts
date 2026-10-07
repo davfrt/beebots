@@ -31,7 +31,8 @@ const BoardSchema = z.object({
   total: z.number().int().nonnegative().max(MAX_BEES),
   page: z.number().int().positive(),
   per: z.number().int().positive().max(50),
-  bees: z.array(HiveBeeSchema).max(50),
+  // Checked one by one: a single malformed or oversized bot must not hide the rest of the board.
+  bees: z.array(z.unknown()).max(50),
 });
 
 export type HiveBee = z.infer<typeof HiveBeeSchema>;
@@ -159,7 +160,10 @@ export class Competition {
       const board = BoardSchema.parse(await r.json());
       if (board.page !== page) throw new Error("Hive board returned the wrong page");
       total = board.total;
-      all.push(...board.bees);
+      for (const raw of board.bees) {
+        const bee = HiveBeeSchema.safeParse(raw);
+        if (bee.success) all.push(bee.data);
+      }
       if (board.bees.length === 0 || page * board.per >= total) break;
       page++;
     }
