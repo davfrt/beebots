@@ -20,6 +20,8 @@ if (mode === "dry") {
   process.exit(0);
 }
 const demo = mode === "demo";
+// Competition trades real money only in its two live slots; bee3 has no keys there.
+const bees = cfg.competition.enabled ? BEES.slice(0, 2) : BEES;
 const cli = createOkxCli({ site: "eea", timeoutMs: 15_000, maxConcurrent: 2 });
 const run = (bee: (typeof BEES)[number], args: string[]) => cli.run<Row[]>({ args, bee, creds: cfg.creds[bee], demo });
 const held = async (bee: (typeof BEES)[number]) => (await run(bee, ["futures", "positions"])).filter((r) => Number(r.pos) !== 0);
@@ -29,7 +31,7 @@ const conditional = async (bee: (typeof BEES)[number]) => await run(bee, ["futur
 if (process.argv.includes("--close")) {
   const instruments = new Map((await createPublicApi(env.OKX_API_BASE || "https://eea.okx.com", demo).instruments()).map((i) => [i.instId, i]));
   const exec = new OkxExecutor(cli, cfg.creds, demo, (id) => instruments.get(id), cfg.risk.maxLeverage);
-  for (const bee of BEES) {
+  for (const bee of bees) {
     try {
       for (const o of await pending(bee)) {
         await run(bee, ["futures", "cancel", o.instId!, "--ordId", o.ordId!]);
@@ -53,7 +55,7 @@ if (process.argv.includes("--close")) {
 }
 
 let problems = 0;
-for (const bee of BEES) {
+for (const bee of bees) {
   try {
     const pos = await held(bee);
     const ords = await pending(bee);
