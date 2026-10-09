@@ -76,10 +76,12 @@ export function rankStrategies(rows: RankedStrategy[]): RankedStrategy[] {
   return [...byStrategy.values()].sort((a, b) => b.returnPct - a.returnPct || b.trades - a.trades || a.fingerprint.localeCompare(b.fingerprint));
 }
 
-/** Paper runners: best first, one per style+coins so challengers don't mirror each other's trades; clones only fill leftover slots. */
+/** Paper runners: best first, one per style+fixed coin list so challengers don't mirror each other's trades; clones only fill
+ * leftover slots. Any-coin strategies each pick their own coins, so they never count as clones. */
 export function pickRunners(ranked: RankedStrategy[], n: number): RankedStrategy[] {
   const seen = new Set<string>();
   const distinct = ranked.filter((s) => {
+    if (!s.coins.length) return true;
     const key = JSON.stringify([s.style, [...new Set(s.coins.map((c) => c.toUpperCase()))].sort()]);
     return !seen.has(key) && !!seen.add(key);
   });

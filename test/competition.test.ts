@@ -61,6 +61,7 @@ describe("competition observer", () => {
     const twin = (id: string, style: RankedStrategy["style"], coins: string[]) => ({ ...row(id, id, 0), style, coins });
     expect(pickRunners([twin("a", "breezy", ["BTC", "ETH"]), twin("b", "breezy", ["eth", "btc"]), twin("c", "bizzy", []), twin("d", "breezy", ["SOL"])], 3).map((r) => r.sourceId)).toEqual(["a", "c", "d"]);
     expect(pickRunners([twin("a", "breezy", ["BTC"]), twin("b", "breezy", ["BTC"])], 3).map((r) => r.sourceId)).toEqual(["a", "b"]);
+    expect(pickRunners([twin("a", "boozy", []), twin("b", "boozy", []), twin("c", "boozy", []), twin("d", "breezy", [])], 3).map((r) => r.sourceId)).toEqual(["a", "b", "c"]);
     const ranked = rankStrategies([row("incumbent", "old", 2), row("challenger", "new", 2.1)]);
     expect(winnerAfterHandoffCost(ranked, "old", 0.15)?.sourceId).toBe("incumbent");
     expect(winnerAfterHandoffCost(ranked, "old", 0.05)?.sourceId).toBe("challenger");
