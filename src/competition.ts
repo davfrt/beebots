@@ -76,6 +76,16 @@ export function rankStrategies(rows: RankedStrategy[]): RankedStrategy[] {
   return [...byStrategy.values()].sort((a, b) => b.returnPct - a.returnPct || b.trades - a.trades || a.fingerprint.localeCompare(b.fingerprint));
 }
 
+/** Paper runners: best first, one per style+coins so challengers don't mirror each other's trades; clones only fill leftover slots. */
+export function pickRunners(ranked: RankedStrategy[], n: number): RankedStrategy[] {
+  const seen = new Set<string>();
+  const distinct = ranked.filter((s) => {
+    const key = JSON.stringify([s.style, [...new Set(s.coins.map((c) => c.toUpperCase()))].sort()]);
+    return !seen.has(key) && !!seen.add(key);
+  });
+  return [...distinct, ...ranked.filter((s) => !distinct.includes(s))].slice(0, n);
+}
+
 export interface CompetitionOpts {
   db: Db;
   url: string;

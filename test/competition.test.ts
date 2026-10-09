@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Competition, executionFingerprint, rankStrategies, strategyFingerprint, type RankedStrategy } from "../src/competition.js";
+import { Competition, executionFingerprint, pickRunners, rankStrategies, strategyFingerprint, type RankedStrategy } from "../src/competition.js";
 import { winnerAfterHandoffCost } from "../src/competition-manager.js";
 import { Db } from "../src/db.js";
 
@@ -58,6 +58,9 @@ describe("competition observer", () => {
       sourceId, fingerprint, returnPct, source: "online", name: sourceId, tagline: "", style: "bizzy", rules: "x", coins: [], img: "/bees/bizzy.jpg", trades: 2, official: false,
     });
     expect(rankStrategies([row("b", "same", 2), row("a", "same", 2), row("c", "other", 3)]).map((r) => r.sourceId)).toEqual(["c", "a"]);
+    const twin = (id: string, style: RankedStrategy["style"], coins: string[]) => ({ ...row(id, id, 0), style, coins });
+    expect(pickRunners([twin("a", "breezy", ["BTC", "ETH"]), twin("b", "breezy", ["eth", "btc"]), twin("c", "bizzy", []), twin("d", "breezy", ["SOL"])], 3).map((r) => r.sourceId)).toEqual(["a", "c", "d"]);
+    expect(pickRunners([twin("a", "breezy", ["BTC"]), twin("b", "breezy", ["BTC"])], 3).map((r) => r.sourceId)).toEqual(["a", "b"]);
     const ranked = rankStrategies([row("incumbent", "old", 2), row("challenger", "new", 2.1)]);
     expect(winnerAfterHandoffCost(ranked, "old", 0.15)?.sourceId).toBe("incumbent");
     expect(winnerAfterHandoffCost(ranked, "old", 0.05)?.sourceId).toBe("challenger");

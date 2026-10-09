@@ -1,6 +1,6 @@
 import type { BeeId, SlotProfile } from "./config.js";
 import type { BeeState } from "./bees/types.js";
-import { executionFingerprint, type Competition, type RankedStrategy, rankStrategies } from "./competition.js";
+import { executionFingerprint, pickRunners, type Competition, type RankedStrategy, rankStrategies } from "./competition.js";
 import type { Db } from "./db.js";
 import type { Engine } from "./engine.js";
 import type { EventBus } from "./events.js";
@@ -262,7 +262,7 @@ export class CompetitionManager {
       this.state.liveInstalls[this.state.activeSlot] ??= this.installation(this.o.live, this.state.activeSlot, winner, now);
     }
 
-    const runners = ranked.slice(0, 3);
+    const runners = pickRunners(ranked, 3);
     const paper = runners.map((strategy, i) => {
       const prior = this.state.paper.find((row) => row.strategy.fingerprint === strategy.fingerprint);
       return { slot: `bee${i + 1}` as BeeId, strategy, startedAt: prior?.startedAt ?? startedAt, install: undefined as Installation | undefined };
