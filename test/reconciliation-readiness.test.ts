@@ -160,6 +160,28 @@ describe("exchange reconciliation readiness", () => {
     restarted.close();
   });
 
+  it("checks fees only for fills still inside the OKX fills window", async () => {
+    const cfg = testConfig({ DRY_RUN: "true" });
+    const market = view([coin("ENA")]);
+    const feed = { view: () => market, refresh: async () => {}, refreshTickers: async () => {}, lastRefreshAt: NOW } as unknown as MarketFeed;
+    const db = new Db(":memory:");
+    const fill = (ts: number, clOrdId: string) => {
+      const decisionId = db.insertDecision({ bee: "bee1", ts, stateHash: "", stateJson: "{}", menuJson: "[]", choice: null, probabilities: null, confidence: null, conviction: null, latencyMs: null, inputTokens: null, jevCostUsd: 0, jevError: null, action: { kind: "open", instId: "ENA-USD_UM_XPERP-310404", side: "long" }, vetoedBy: null, forcedBy: null, status: "test" });
+      const orderId = db.insertOrder({ decisionId, bee: "bee1", ts, clOrdId, instId: "ENA-USD_UM_XPERP-310404", side: "buy", contracts: 1, reduceOnly: false, purpose: "open" });
+      db.updateOrder(orderId, "filled", `ord-${clOrdId}`, null);
+      db.insertFill({ orderId, bee: "bee1", ts, instId: "ENA-USD_UM_XPERP-310404", side: "buy", contracts: 1, px: 100, notionalUsd: 100, feeUsd: 0.05, realisedUsd: 0 });
+    };
+    fill(NOW - 4 * 24 * 60 * 60_000, "old");
+    const engine = new Engine({ cfg, db, feed, jev: new Jev({ ...cfg.jev, client: openingJev(), now: () => NOW }), exec: fakeExchange(() => [], []), bus: new EventBus(db), alerts: new Alerts(undefined), now: () => NOW, ids: ["bee1"] });
+    await engine.start();
+    engine.stop();
+    expect(engine.snapshot().recon.ok).toBe(true);
+
+    fill(NOW - 60_000, "recent");
+    await engine.reconcile();
+    expect(engine.snapshot().recon).toMatchObject({ ok: false, detail: expect.stringContaining("incomplete OKX fee history") });
+  });
+
   it("blocks opening decisions until unreadable exchange state recovers", async () => {
     const cfg = testConfig({ DRY_RUN: "true" });
     const market = view([coin("ENA", { ret24hPct: 25, ret7dPct: 43 }), coin("SUI", { ret24hPct: 12, ret7dPct: 40 })]);

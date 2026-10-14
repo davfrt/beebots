@@ -21,6 +21,8 @@ import { buildSnapshot } from "./snapshot.js";
 
 const FUNDING_HOURS_UTC = [0, 8, 16];
 const RECON_MS = 5 * 60_000;
+/** OKX `trade/fills` only returns the last 3 days, so fee checks stay inside a 2-day window. */
+const FEE_CHECK_MS = 2 * 24 * 60 * 60_000;
 /** How often a benched bee gets a live P&L row in the stream. */
 const PULSE_MS = 4_000;
 /** How long a bee opens nothing after the exchange rejects one of its new orders. */
@@ -1003,8 +1005,8 @@ export class Engine {
 
       // Fees to the cent on our recent filled orders.
       const rows = this.d.db.raw
-        .prepare(`SELECT o.ord_id AS ordId, o.inst_id AS instId, f.fee_usd AS fee FROM orders o JOIN fills f ON f.order_id = o.id WHERE o.bee = ? AND o.ord_id IS NOT NULL ORDER BY o.id DESC LIMIT 50`)
-        .all(id) as Array<{ ordId: string; instId: string; fee: number }>;
+        .prepare(`SELECT o.ord_id AS ordId, o.inst_id AS instId, f.fee_usd AS fee FROM orders o JOIN fills f ON f.order_id = o.id WHERE o.bee = ? AND o.ord_id IS NOT NULL AND f.ts >= ? ORDER BY o.id DESC LIMIT 50`)
+        .all(id, now - FEE_CHECK_MS) as Array<{ ordId: string; instId: string; fee: number }>;
       const theirFees = await this.d.exec.feesFor(id, [...new Set(rows.map((r) => r.instId))], new Set(rows.map((r) => r.ordId)));
       if (theirFees) {
         if (rows.length) {
