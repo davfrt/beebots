@@ -22,7 +22,8 @@ export async function preflightLiveAccounts({ cfg, db, exec, ids }: { cfg: Confi
     if (account.uid === account.mainUid) throw new Error(`live preflight: ${slot} must use an OKX EEA subaccount`);
     if (account.permissions.includes("withdraw")) throw new Error(`live preflight: ${slot} key has withdrawal permission`);
     if (account.permissions.includes("transfer")) throw new Error(`live preflight: ${slot} key has transfer permission`);
-    if (!account.permissions.includes("read") || !account.permissions.includes("trade")) throw new Error(`live preflight: ${slot} key needs read and trade permissions`);
+    // OKX reports the read permission as "read_only".
+    if (!account.permissions.some((p) => p === "read" || p === "read_only") || !account.permissions.includes("trade")) throw new Error(`live preflight: ${slot} key needs read and trade permissions`);
     if (!account.ipBound) throw new Error(`live preflight: ${slot} key must be IP-bound`);
     const tolerance = Math.max(1, cfg.risk.startEquityUsd * 0.02);
     if (equity === null || Math.abs(equity - cfg.risk.startEquityUsd) > tolerance) throw new Error(`live preflight: ${slot} equity differs from expected equity`);

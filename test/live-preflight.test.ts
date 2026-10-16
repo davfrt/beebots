@@ -69,4 +69,9 @@ describe("live account preflight", () => {
     expect(result).toEqual({ firstStart: true, slots: [{ slot: "bee1", equityUsd: 333, flat: true }, { slot: "bee2", equityUsd: 333, flat: true }] });
     expect(JSON.stringify(result)).not.toContain("sub-");
   });
+
+  it("accepts OKX's read_only permission name", async () => {
+    const perms = { permissions: ["read_only", "trade"] };
+    await expect(preflightLiveAccounts({ cfg: cfg(), db: new Db(":memory:"), exec: fakeAccounts({ bee1: perms, bee2: perms }), ids: ["bee1", "bee2"] })).resolves.toBeTruthy();
+  });
 });
